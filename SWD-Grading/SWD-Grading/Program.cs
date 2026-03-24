@@ -1,4 +1,4 @@
-﻿
+
 using Amazon.S3;
 using BLL.Interface;
 using BLL.Mapper;
@@ -21,6 +21,20 @@ namespace SWD_Grading
 		public static void Main(string[] args)
 		{
 			var builder = WebApplication.CreateBuilder(args);
+
+			// Google service account credential path (supports relative path from content root)
+			var credentialPath = builder.Configuration["GoogleCloud:CredentialPath"];
+			if (!string.IsNullOrWhiteSpace(credentialPath))
+			{
+				var absoluteCredentialPath = Path.IsPathRooted(credentialPath)
+					? credentialPath
+					: Path.Combine(builder.Environment.ContentRootPath, credentialPath);
+
+				if (File.Exists(absoluteCredentialPath))
+				{
+					Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS", absoluteCredentialPath);
+				}
+			}
 
 			// Add services to the container.
 

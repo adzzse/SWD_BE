@@ -36,3 +36,6 @@ bld/
 # Temp storage for uploads
 temp/
 *.tmp
+
+# Google service account key (local/deploy secret)
+SWD-Grading/credentials/*.json
