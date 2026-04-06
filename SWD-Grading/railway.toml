@@ -1,0 +1,7 @@
+# Railway: Docker build context MUST be this folder (solution root: BLL/, DAL/, Model/, SWD-Grading/).
+# In Railway Dashboard → Service → Settings → set Root Directory to the repo path that contains
+# BLL, DAL, Model, SWD-Grading side-by-side (often "SWD-Grading" if your GitHub repo wraps the solution).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "SWD-Grading/Dockerfile"
