@@ -53,27 +53,20 @@ namespace SWD_Grading
 			builder.Services.AddControllers();
 
 			// CORS Configuration
+			var allowedOrigins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>()
+				?? new[]
+				{
+					"https://swd-a82ibidfl-duys-projects-fa81d97e.vercel.app"
+				};
+
 			builder.Services.AddCors(options =>
 			{
-				options.AddPolicy("AllowAll", policy =>
+				options.AddPolicy("FrontendPolicy", policy =>
 				{
-					policy.AllowAnyOrigin()
+					policy.WithOrigins(allowedOrigins)
 						  .AllowAnyMethod()
 						  .AllowAnyHeader();
 				});
-
-				// Hoặc nếu bạn muốn cấu hình cụ thể hơn cho môi trường production
-				//options.AddPolicy("ProductionPolicy", policy =>
-				//{
-				//    policy.WithOrigins(
-				//            "http://localhost:3000",  // React app
-				//            "http://localhost:4200",  // Angular app
-				//            "https://yourdomain.com"  // Production domain
-				//          )
-				//          .AllowAnyMethod()
-				//          .AllowAnyHeader()
-				//          .AllowCredentials();
-				//});
 			});
 
 			// JWT Configuration
@@ -228,7 +221,7 @@ namespace SWD_Grading
 				app.UseSwaggerUI();
 			}
 
-			app.UseCors("AllowAll");
+			app.UseCors("FrontendPolicy");
 
 			app.UseHttpsRedirection();
 			app.UseAuthentication();
