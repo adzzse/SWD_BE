@@ -26,9 +26,9 @@ using BLL.Model.Request.Grade;
 using BLL.Model.Response.Grade;
 using Amazon;
 using Amazon.S3;
+using Amazon.S3.Model;
 using Model.Configuration;
 using Microsoft.Extensions.Configuration;
-using Amazon.S3.Model;
 using OfficeOpenXml;
 using Microsoft.EntityFrameworkCore;
 using DocumentFormat.OpenXml.Office2016.Excel;
@@ -455,7 +455,15 @@ namespace BLL.Service
 			var key = GetS3KeyFromUrl(exam.OriginalExcel);
 			if (string.IsNullOrWhiteSpace(key))
 				throw new AppException("Invalid S3 key extracted from OriginalExcel", 500);
-			var original = await DownloadFromS3Async(key);
+			MemoryStream original;
+			try
+			{
+				original = await DownloadFromS3Async(key);
+			}
+			catch (AmazonS3Exception ex)
+			{
+				throw new AppException($"Failed to download original Excel template from S3: {ex.Message}", 500);
+			}
 			if (original == null)
 				throw new AppException("Failed to download original Excel template", 500);
 			if (!original.CanRead)
@@ -481,7 +489,7 @@ namespace BLL.Service
 					throw new AppException("WorkbookPart is missing in Excel file", 500);
 				var sheet = wbPart.Workbook.Sheets
 					.Cast<Sheet>()
-					.First(s => s.Name!.Value.Contains("Marking"));
+					.FirstOrDefault(s => (s.Name?.Value ?? "").Contains("Marking", StringComparison.OrdinalIgnoreCase));
 				if (sheet == null)
 					throw new AppException("Sheet 'Marking' not found in Excel template", 400);
 				var wsPart = (WorksheetPart)wbPart.GetPartById(sheet.Id!);
