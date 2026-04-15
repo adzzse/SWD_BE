@@ -50,5 +50,6 @@ namespace Model.Entity
 	/// </summary>
 	[Required]
 	public bool IsEmbedded { get; set; } = false;
+	public int? QuestionNumber { get; set; }
 }
 }
