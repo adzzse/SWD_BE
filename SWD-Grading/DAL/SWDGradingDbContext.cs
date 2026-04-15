@@ -165,6 +165,9 @@ namespace DAL
 					  .WithMany()
 					  .HasForeignKey(e => e.ExamZipId)
 					  .OnDelete(DeleteBehavior.Restrict);
+
+				entity.Property(e => e.QuestionNumber)
+					  .HasColumnName("QuestionNumber");
 			});
 			modelBuilder.Entity<ExamQuestion>(entity =>
 			{
