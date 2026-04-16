@@ -20,6 +20,7 @@ namespace BLL.Interface
 		/// <param name="wordFilePath">Path to the Word document</param>
 		/// <returns>Extracted text content</returns>
 		string ExtractTextFromWord(string wordFilePath);
+		Task ProcessSingleSolutionAsync(long examStudentId, long examZipId, string wordFilePath, string originalFileName);
 	}
 }
 

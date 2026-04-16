@@ -3,6 +3,7 @@ using DAL.Interface;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Model.Entity;
 using Model.Enums;
@@ -195,6 +196,92 @@ namespace BLL.Service
 			}
 		}
 
+		public async Task ProcessSingleSolutionAsync(long examStudentId, long examZipId, string wordFilePath, string originalFileName)
+		{
+			ExamZip? examZip = null;
+
+			try
+			{
+				examZip = await _unitOfWork.ExamZipRepository.GetByIdAsync(examZipId);
+				if (examZip == null)
+				{
+					throw new Exception($"ExamZip with ID {examZipId} not found");
+				}
+
+				if (string.IsNullOrWhiteSpace(wordFilePath) || !File.Exists(wordFilePath))
+				{
+					examZip.ParseStatus = ParseStatus.ERROR;
+					examZip.ParseSummary = "Uploaded file not found at specified path";
+					await _unitOfWork.SaveChangesAsync();
+					return;
+				}
+
+				var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
+				if (extension == ".doc")
+				{
+					throw new ArgumentException("Direct upload currently supports only .docx files. Please convert .doc to .docx before uploading.");
+				}
+
+				if (extension != ".docx")
+				{
+					throw new ArgumentException($"File type {extension} is not allowed. Only .docx files are accepted for direct upload.");
+				}
+
+				var examStudent = await _unitOfWork.GetRepository<ExamStudent, long>()
+					.Query(asNoTracking: false)
+					.Include(es => es.Student)
+					.FirstOrDefaultAsync(es => es.Id == examStudentId);
+
+				if (examStudent == null)
+				{
+					throw new Exception($"ExamStudent with ID {examStudentId} not found");
+				}
+
+				var exam = await _unitOfWork.ExamRepository.GetByIdAsync(examStudent.ExamId);
+				if (exam == null)
+				{
+					throw new Exception($"Exam with ID {examStudent.ExamId} not found");
+				}
+
+				var studentCode = examStudent.Student.StudentCode;
+				var s3Path = $"{exam.ExamCode}/{studentCode}";
+
+				await ProcessWordFileAsync(wordFilePath, originalFileName, examStudent, examZip, s3Path, studentCode);
+
+				examStudent.Status = ExamStudentStatus.PARSED;
+				examStudent.Note = $"Processed direct upload '{originalFileName}'";
+				examZip.ParseStatus = ParseStatus.DONE;
+				examZip.ParseSummary = $"Direct upload processed successfully for student '{studentCode}'.";
+
+				await _unitOfWork.SaveChangesAsync();
+			}
+			catch (Exception ex)
+			{
+				if (examZip != null)
+				{
+					examZip.ParseStatus = ParseStatus.ERROR;
+					examZip.ParseSummary = $"Direct upload failed: {ex.Message}";
+					await _unitOfWork.SaveChangesAsync();
+				}
+
+				throw;
+			}
+			finally
+			{
+				if (!string.IsNullOrWhiteSpace(wordFilePath) && File.Exists(wordFilePath))
+				{
+					try
+					{
+						File.Delete(wordFilePath);
+					}
+					catch (Exception ex)
+					{
+						_logger.LogWarning(ex, "Failed to delete temp file for direct upload: {FilePath}", wordFilePath);
+					}
+				}
+			}
+		}
+
 	private async Task ProcessStudentFolderAsync(string studentFolderPath, string folderName, ExamZip examZip, Exam exam)
 	{
 		// Use entire folder name as StudentCode (e.g., "Anhddhse170283")
@@ -287,60 +374,8 @@ namespace BLL.Service
 		foreach (var wordFilePath in allWordFiles)
 		{
 			var fileName = Path.GetFileName(wordFilePath);
-
-			// Upload Word file to S3
-			string wordFileS3Url;
-			using (var wordFileStream = File.OpenRead(wordFilePath))
-			{
-				wordFileS3Url = await _s3Service.UploadFileAsync(wordFileStream, fileName, s3Path);
-			}
-
-			// Extract text from Word document
-			string? extractedText = null;
-			string? parseMessage = null;
-			DocParseStatus parseStatus;
-
-			try
-			{
-				extractedText = ExtractTextFromWord(wordFilePath);
-				parseStatus = DocParseStatus.OK;
-				parseMessage = "Successfully parsed";
-			}
-			catch (Exception ex)
-			{
-				parseStatus = DocParseStatus.ERROR;
-				parseMessage = $"Error parsing Word document: {ex.Message}";
-			}
-
-			// Create DocFile record
-			var docFile = new DocFile
-			{
-				ExamStudentId = examStudent.Id,
-				ExamZipId = examZip.Id,
-				FileName = fileName,
-				FilePath = wordFileS3Url,
-				ParsedText = extractedText,
-				ParseStatus = parseStatus,
-				ParseMessage = parseMessage
-			};
-				await _unitOfWork.DocFileRepository.AddAsync(docFile);
-				await _unitOfWork.SaveChangesAsync();
-
-				//--------------------------------------------------------------------
-				// NEW: SPLIT SOLUTION BY QUESTIONS
-				//--------------------------------------------------------------------
-				if (parseStatus == DocParseStatus.OK)
-				{
-					try 
-					{
-						await SplitStudentSolutionByQuestionsAsync(wordFilePath, examStudent.Id, examZip.Id, s3Path);
-					}
-					catch (Exception ex)
-					{
-						_logger.LogError(ex, $"Failed to split document {fileName} for student {studentCode}");
-					}
-				}
-			}
+			await ProcessWordFileAsync(wordFilePath, fileName, examStudent, examZip, s3Path, studentCode);
+		}
 
 			// Update ExamStudent status to PARSED
 			examStudent.Status = ExamStudentStatus.PARSED;
@@ -348,6 +383,59 @@ namespace BLL.Service
 
 			await _unitOfWork.SaveChangesAsync();
 		}
+
+	private async Task ProcessWordFileAsync(string wordFilePath, string fileName, ExamStudent examStudent, ExamZip examZip, string s3Path, string studentCode)
+	{
+		string wordFileS3Url;
+		using (var wordFileStream = File.OpenRead(wordFilePath))
+		{
+			wordFileS3Url = await _s3Service.UploadFileAsync(wordFileStream, fileName, s3Path);
+		}
+
+		string? extractedText = null;
+		string? parseMessage = null;
+		DocParseStatus parseStatus;
+
+		try
+		{
+			extractedText = ExtractTextFromWord(wordFilePath);
+			parseStatus = DocParseStatus.OK;
+			parseMessage = "Successfully parsed";
+		}
+		catch (Exception ex)
+		{
+			parseStatus = DocParseStatus.ERROR;
+			parseMessage = $"Error parsing Word document: {ex.Message}";
+		}
+
+		var docFile = new DocFile
+		{
+			ExamStudentId = examStudent.Id,
+			ExamZipId = examZip.Id,
+			FileName = fileName,
+			FilePath = wordFileS3Url,
+			ParsedText = extractedText,
+			ParseStatus = parseStatus,
+			ParseMessage = parseMessage
+		};
+		await _unitOfWork.DocFileRepository.AddAsync(docFile);
+		await _unitOfWork.SaveChangesAsync();
+
+            //--------------------------------------------------------------------
+            // NEW: SPLIT SOLUTION BY QUESTIONS
+            //--------------------------------------------------------------------
+            if (parseStatus == DocParseStatus.OK)
+		{
+			try
+			{
+				await SplitStudentSolutionByQuestionsAsync(wordFilePath, examStudent.Id, examZip.Id, s3Path);
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, $"Failed to split document {fileName} for student {studentCode}");
+			}
+		}
+	}
 
 	private async Task SplitStudentSolutionByQuestionsAsync(string sourcePath, long examStudentId, long examZipId, string s3Path)
 	{

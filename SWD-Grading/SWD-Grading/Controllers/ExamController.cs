@@ -23,12 +23,14 @@ namespace SWD_Grading.Controllers
 		private readonly IExamStudentService _examStudentService;
 		private readonly ITesseractOcrService _ocrService;
 		private readonly IS3Service _s3Service;
-		public ExamController(IExamService examService, ITesseractOcrService ocrService, IExamStudentService examStudentService, IS3Service s3Service)
+		private readonly IExamUploadService _examUploadService;
+		public ExamController(IExamService examService, ITesseractOcrService ocrService, IExamStudentService examStudentService, IS3Service s3Service, IExamUploadService examUploadService)
 		{
 			_examService = examService;
 			_ocrService = ocrService;
 			_examStudentService = examStudentService;
 			_s3Service = s3Service;
+			_examUploadService = examUploadService;
 		}
 
 		[HttpPost]
@@ -268,6 +270,40 @@ namespace SWD_Grading.Controllers
 				message = $"Successfully extracted {count} questions from DOCX.",
 				questionCount = count
 			});
+		}
+
+		[HttpPost("{examId}/exam-students/{examStudentId}/upload-solution")]
+		[Consumes("multipart/form-data")]
+		[RequestSizeLimit(524288000)]
+		[RequestFormLimits(MultipartBodyLengthLimit = 524288000)]
+		[ProducesResponseType(typeof(UploadStudentSolutionsResponse), StatusCodes.Status200OK)]
+		[ProducesResponseType(StatusCodes.Status400BadRequest)]
+		[ProducesResponseType(StatusCodes.Status500InternalServerError)]
+		public async Task<IActionResult> UploadSingleSolution([FromRoute] long examId, [FromRoute] long examStudentId, IFormFile file)
+		{
+			try
+			{
+				var response = await _examUploadService.UploadSingleSolutionAsync(file, examId, examStudentId);
+				return Ok(response);
+			}
+			catch (ArgumentException ex)
+			{
+				return BadRequest(new UploadStudentSolutionsResponse
+				{
+					ExamZipId = 0,
+					Status = "Error",
+					Message = ex.Message
+				});
+			}
+			catch (Exception ex)
+			{
+				return StatusCode(500, new UploadStudentSolutionsResponse
+				{
+					ExamZipId = 0,
+					Status = "Error",
+					Message = $"Internal server error: {ex.Message}"
+				});
+			}
 		}
 
 		[HttpGet("students/{id}/next")]
