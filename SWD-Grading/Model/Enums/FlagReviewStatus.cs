@@ -4,6 +4,8 @@ namespace Model.Enums
 	{
 		PENDING,
 		CONFIRMED,
-		REJECTED
+		REJECTED,
+		AI_REVIEWED,
+		TEACHER_REVIEWED
 	}
 }

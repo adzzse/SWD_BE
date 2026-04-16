@@ -173,8 +173,6 @@ namespace SWD_Grading
 
 				return new TesseractOcrService(tessdataPath, uow, s3);
 			});
-			builder.Services.AddScoped<IAuthService, AuthService>();
-			builder.Services.AddScoped<IExamService, ExamService>();
 			builder.Services.AddScoped<IExamStudentService, ExamStudentService>();
 			builder.Services.AddScoped<IS3Service, S3Service>();
 			builder.Services.AddScoped<IFileProcessingService, FileProcessingService>();
@@ -182,6 +180,7 @@ namespace SWD_Grading
 			builder.Services.AddScoped<IVectorService, VectorService>();
 			builder.Services.AddScoped<IAIVerificationService, AIVerificationService>();
 			builder.Services.AddScoped<IPlagiarismService, PlagiarismService>();
+			builder.Services.AddScoped<IPacketSimilarityService, PacketSimilarityService>();
 
 			// Register BackgroundJobService to automatically process uploaded ZIP files
 			builder.Services.AddHostedService<BackgroundJobService>();
