@@ -33,6 +33,7 @@ namespace BLL.Interface
 		/// <param name="filter">Filter parameters</param>
 		/// <returns>Paged exam zip response</returns>
 		Task<PagingResponse<ExamZipResponse>> GetAllExamZipsAsync(ExamZipFilter filter);
+		Task<UploadStudentSolutionsResponse> UploadSingleSolutionAsync(IFormFile file, long examId, long examStudentId);
 	}
 }
 
