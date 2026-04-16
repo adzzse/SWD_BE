@@ -40,9 +40,19 @@ namespace BLL.Service
 
 			// Check file extension
 			var extension = Path.GetExtension(zipFile.FileName).ToLower();
-			if (extension != ".zip")
+			var allowedExtensions = _fileUploadConfig.AllowedExtensions
+				.Where(value => !string.IsNullOrWhiteSpace(value))
+				.Select(value => value.Trim().ToLowerInvariant())
+				.ToHashSet();
+
+			if (allowedExtensions.Count == 0)
 			{
-				throw new ArgumentException($"File type {extension} is not allowed. Only .zip files are accepted.");
+				allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".zip" };
+			}
+
+			if (!allowedExtensions.Contains(extension))
+			{
+				throw new ArgumentException($"File type {extension} is not allowed. Only {string.Join(" and ", allowedExtensions.OrderBy(value => value))} files are accepted.");
 			}
 
 			// Check file size
@@ -74,7 +84,7 @@ namespace BLL.Service
 			}
 
 			// Save ZIP file temporarily
-			var fileName = $"{examCode}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid()}.zip";
+			var fileName = $"{examCode}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid()}{extension}";
 			var zipFilePath = Path.Combine(tempStoragePath, fileName);
 
 			using (var stream = new FileStream(zipFilePath, FileMode.Create))
