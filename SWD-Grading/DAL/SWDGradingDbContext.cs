@@ -275,6 +275,7 @@ namespace DAL
 					  .IsRequired();
 
 				entity.Property(e => e.Source)
+					  .HasConversion<string>()
 					  .HasMaxLength(100)
 					  .IsRequired();
 
@@ -286,7 +287,7 @@ namespace DAL
 				entity.Property(e => e.TeacherNotes)
 					  .HasMaxLength(500);
 
-				entity.HasIndex(e => new { e.QuestionPacketId, e.MatchedQuestionPacketId })
+				entity.HasIndex(e => new { e.QuestionPacketId, e.MatchedQuestionPacketId, e.Source })
 					  .IsUnique();
 
 				entity.HasOne(e => e.QuestionPacket)
