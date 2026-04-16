@@ -3,6 +3,7 @@ using System;
 using DAL;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DAL.Migrations
 {
     [DbContext(typeof(SWDGradingDbContext))]
-    partial class SWDGradingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260414181656_FixQuestionNumberMappingExplicit")]
+    partial class FixQuestionNumberMappingExplicit
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -59,8 +62,7 @@ namespace DAL.Migrations
                         .HasColumnType("text");
 
                     b.Property<int?>("QuestionNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("QuestionNumber");
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -219,64 +221,6 @@ namespace DAL.Migrations
                     b.ToTable("exam_zip", (string)null);
                 });
 
-            modelBuilder.Entity("Model.Entity.Flag", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("MatchedQuestionPacketId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("QuestionPacketId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("ReviewStatus")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTime?>("ReviewedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("ReviewedByUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("SimilarityScore")
-                        .HasColumnType("DECIMAL(5,4)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<bool?>("TeacherDecision")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("TeacherNotes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<decimal>("ThresholdUsed")
-                        .HasColumnType("DECIMAL(5,4)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MatchedQuestionPacketId");
-
-                    b.HasIndex("ReviewedByUserId");
-
-                    b.HasIndex("QuestionPacketId", "MatchedQuestionPacketId")
-                        .IsUnique();
-
-                    b.ToTable("flag", (string)null);
-                });
-
             modelBuilder.Entity("Model.Entity.Grade", b =>
                 {
                     b.Property<long>("Id")
@@ -381,119 +325,6 @@ namespace DAL.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("GradeExport", (string)null);
-                });
-
-            modelBuilder.Entity("Model.Entity.ProcessingJob", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("FinishedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("JobType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int>("ProgressPercent")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<long>("SubmissionId")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SubmissionId", "JobType", "CreatedAt");
-
-                    b.ToTable("processing_job", (string)null);
-                });
-
-            modelBuilder.Entity("Model.Entity.QuestionPacket", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("ExamId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("ExamQuestionId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("ExamStudentId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("ExtractedAnswerText")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ImageUrlsJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<decimal?>("ParseConfidence")
-                        .HasColumnType("DECIMAL(5,2)");
-
-                    b.Property<string>("ParseNotes")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PrimaryImageUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<int>("QuestionNumber")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<long>("SubmissionId")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExamQuestionId");
-
-                    b.HasIndex("ExamStudentId");
-
-                    b.HasIndex("SubmissionId", "QuestionNumber")
-                        .IsUnique();
-
-                    b.HasIndex("ExamId", "ExamStudentId", "QuestionNumber");
-
-                    b.ToTable("question_packet", (string)null);
                 });
 
             modelBuilder.Entity("Model.Entity.Rubric", b =>
@@ -647,60 +478,6 @@ namespace DAL.Migrations
                     b.ToTable("student", (string)null);
                 });
 
-            modelBuilder.Entity("Model.Entity.Submission", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("Attempt")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("ExamId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("ExamStudentId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("FailureReason")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OriginalFileName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("OriginalFileUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("SourceFormat")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExamStudentId");
-
-                    b.HasIndex("ExamId", "ExamStudentId", "Attempt")
-                        .IsUnique();
-
-                    b.ToTable("submission", (string)null);
-                });
-
             modelBuilder.Entity("Model.Entity.User", b =>
                 {
                     b.Property<int>("Id")
@@ -799,32 +576,6 @@ namespace DAL.Migrations
                     b.Navigation("Exam");
                 });
 
-            modelBuilder.Entity("Model.Entity.Flag", b =>
-                {
-                    b.HasOne("Model.Entity.QuestionPacket", "MatchedQuestionPacket")
-                        .WithMany("MatchedFlags")
-                        .HasForeignKey("MatchedQuestionPacketId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Model.Entity.QuestionPacket", "QuestionPacket")
-                        .WithMany("SourceFlags")
-                        .HasForeignKey("QuestionPacketId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Model.Entity.User", "ReviewedByUser")
-                        .WithMany("ReviewedFlags")
-                        .HasForeignKey("ReviewedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("MatchedQuestionPacket");
-
-                    b.Navigation("QuestionPacket");
-
-                    b.Navigation("ReviewedByUser");
-                });
-
             modelBuilder.Entity("Model.Entity.Grade", b =>
                 {
                     b.HasOne("Model.Entity.ExamStudent", "ExamStudent")
@@ -872,51 +623,6 @@ namespace DAL.Migrations
                     b.Navigation("Exam");
 
                     b.Navigation("Teacher");
-                });
-
-            modelBuilder.Entity("Model.Entity.ProcessingJob", b =>
-                {
-                    b.HasOne("Model.Entity.Submission", "Submission")
-                        .WithMany("ProcessingJobs")
-                        .HasForeignKey("SubmissionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Submission");
-                });
-
-            modelBuilder.Entity("Model.Entity.QuestionPacket", b =>
-                {
-                    b.HasOne("Model.Entity.Exam", "Exam")
-                        .WithMany("QuestionPackets")
-                        .HasForeignKey("ExamId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Model.Entity.ExamQuestion", "ExamQuestion")
-                        .WithMany("QuestionPackets")
-                        .HasForeignKey("ExamQuestionId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Model.Entity.ExamStudent", "ExamStudent")
-                        .WithMany("QuestionPackets")
-                        .HasForeignKey("ExamStudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Model.Entity.Submission", "Submission")
-                        .WithMany("QuestionPackets")
-                        .HasForeignKey("SubmissionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Exam");
-
-                    b.Navigation("ExamQuestion");
-
-                    b.Navigation("ExamStudent");
-
-                    b.Navigation("Submission");
                 });
 
             modelBuilder.Entity("Model.Entity.Rubric", b =>
@@ -982,52 +688,23 @@ namespace DAL.Migrations
                     b.Navigation("TeacherVerifiedByUser");
                 });
 
-            modelBuilder.Entity("Model.Entity.Submission", b =>
-                {
-                    b.HasOne("Model.Entity.Exam", "Exam")
-                        .WithMany("Submissions")
-                        .HasForeignKey("ExamId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Model.Entity.ExamStudent", "ExamStudent")
-                        .WithMany("Submissions")
-                        .HasForeignKey("ExamStudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Exam");
-
-                    b.Navigation("ExamStudent");
-                });
-
             modelBuilder.Entity("Model.Entity.Exam", b =>
                 {
                     b.Navigation("ExamStudents");
 
                     b.Navigation("GradeExports");
 
-                    b.Navigation("QuestionPackets");
-
                     b.Navigation("Questions");
-
-                    b.Navigation("Submissions");
                 });
 
             modelBuilder.Entity("Model.Entity.ExamQuestion", b =>
                 {
-                    b.Navigation("QuestionPackets");
-
                     b.Navigation("Rubrics");
                 });
 
             modelBuilder.Entity("Model.Entity.ExamStudent", b =>
                 {
                     b.Navigation("Grades");
-
-                    b.Navigation("QuestionPackets");
-
-                    b.Navigation("Submissions");
                 });
 
             modelBuilder.Entity("Model.Entity.Grade", b =>
@@ -1035,30 +712,14 @@ namespace DAL.Migrations
                     b.Navigation("Details");
                 });
 
-            modelBuilder.Entity("Model.Entity.QuestionPacket", b =>
-                {
-                    b.Navigation("MatchedFlags");
-
-                    b.Navigation("SourceFlags");
-                });
-
             modelBuilder.Entity("Model.Entity.SimilarityCheck", b =>
                 {
                     b.Navigation("SimilarityResults");
                 });
 
-            modelBuilder.Entity("Model.Entity.Submission", b =>
-                {
-                    b.Navigation("ProcessingJobs");
-
-                    b.Navigation("QuestionPackets");
-                });
-
             modelBuilder.Entity("Model.Entity.User", b =>
                 {
                     b.Navigation("GradeExports");
-
-                    b.Navigation("ReviewedFlags");
                 });
 #pragma warning restore 612, 618
         }
