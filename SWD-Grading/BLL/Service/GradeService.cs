@@ -98,11 +98,11 @@ namespace BLL.Service
 			var newGrade = new Grade
 			{
 				ExamStudentId = request.ExamStudentId,
-				TotalScore = 0,
-				Comment = "",
+				TotalScore = request.TotalScore,
+				Comment = request.Comment,
 				GradedAt = DateTime.UtcNow,
 				GradedBy = teachercode,
-				Status = GradeStatus.CREATED
+				Status = GradeStatus.GRADED
 			};
             var existingGrades = await _unitOfWork.GradeRepository.GetByExamStudentId(request.ExamStudentId);
             if (existingGrades.Any())
@@ -115,6 +115,15 @@ namespace BLL.Service
                 newGrade.Attempt = 1;
             }
 			await _unitOfWork.GradeRepository.AddAsync(newGrade);
+
+			// Update student status to GRADED immediately since it receives valid points
+			var existingExamStudent = await _unitOfWork.ExamStudentRepository.GetByIdAsync(request.ExamStudentId);
+			if (existingExamStudent != null)
+			{
+				existingExamStudent.Status = ExamStudentStatus.GRADED;
+				await _unitOfWork.ExamStudentRepository.UpdateAsync(existingExamStudent);
+			}
+
 			await _unitOfWork.SaveChangesAsync();
 
             var questions = await _unitOfWork.ExamQuestionRepository
@@ -126,11 +135,17 @@ namespace BLL.Service
             {
                 foreach (var rubric in question.Rubrics)
                 {
+                    // Find if frontend provided a score for this rubric
+                    var providedDetail = request.Details.FirstOrDefault(d => d.RubricId == rubric.Id);
+                    decimal score = providedDetail != null ? providedDetail.Score : 0;
+
 					gradeDetails.Add(new GradeDetail
 					{
 						GradeId = newGrade.Id,
 						Grade = newGrade,
-						Rubric = rubric,
+						RubricId = rubric.Id,
+                        Rubric = rubric,
+                        Score = score
 					});
                 }
             }
@@ -174,8 +189,8 @@ namespace BLL.Service
 
 		public async Task Update(GradeUpdateRequest request, long id)
 		{
-			// 1. Get the grade
-			var existingGrade = await _unitOfWork.GradeRepository.GetById(id);
+			// 1. Get the grade using tracking so we don't cause Identity conflicts
+			var existingGrade = await _unitOfWork.GradeRepository.GetByIdAsync(id);
 			if (existingGrade == null)
 			{
 				throw new AppException("Grade not found", 404);
@@ -192,7 +207,7 @@ namespace BLL.Service
 					if (detail != null)
 					{
 						detail.Score = detailDto.Score;
-						await _unitOfWork.GradeDetailRepository.UpdateAsync(detail);
+						// Entity is tracked, changes will be saved automatically by SaveChangesAsync
 					}
 				}
 
@@ -215,10 +230,8 @@ namespace BLL.Service
 			if (existingExamStudent != null)
 			{
 				existingExamStudent.Status = ExamStudentStatus.GRADED;
-				await _unitOfWork.ExamStudentRepository.UpdateAsync(existingExamStudent);
 			}
 
-			await _unitOfWork.GradeRepository.UpdateAsync(existingGrade);
 			await _unitOfWork.SaveChangesAsync();
 		}
 
