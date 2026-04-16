@@ -238,27 +238,41 @@ namespace BLL.Service
 		}
 	}
 
-		public async Task IndexDocumentAsync(long docFileId, long examId, string studentCode, string text)
+		public async Task IndexDocumentAsync(long docFileId,long examId,string studentCode,int? questionNumber,string text)
 		{
 			try
 			{
+				await EnsureCollectionExistsAsync();
 			_logger.LogInformation($"[IndexDocument] Starting indexing for DocFile ID: {docFileId}, Student: {studentCode}, Exam: {examId}, Text length: {text.Length} chars");
-			
+
 				var embedding = await GenerateEmbeddingAsync(text);
+				_logger.LogInformation("[IndexDocument] Prepared vector for DocFile {DocFileId} with dimension: {Dim}", docFileId, embedding?.Length ?? 0);
+
+if (embedding == null || embedding.Length == 0)
+{
+    _logger.LogError("[IndexDocument] Generated empty embedding for DocFile {DocFileId}", docFileId);
+    throw new InvalidOperationException($"Generated empty embedding for DocFile {docFileId}");
+}
 			_logger.LogDebug($"[IndexDocument] Generated {_vectorSize}-dimensional embedding vector for DocFile {docFileId}");
 
 				var point = new PointStruct
-				{
-					Id = new PointId { Num = (ulong)docFileId },
-					Vectors = embedding,
-					Payload =
-					{
-						["docFileId"] = docFileId,
-						["examId"] = examId,
-						["studentCode"] = studentCode,
-						["textLength"] = text.Length
-					}
-				};
+{
+    Id = new PointId { Num = (ulong)docFileId },
+    Vectors = embedding,
+    Payload =
+    {
+        ["docFileId"] = docFileId,
+        ["examId"] = examId,
+        ["studentCode"] = studentCode?.ToLower() ?? "",
+        ["textLength"] = text.Length
+    }
+};
+
+if (questionNumber.HasValue)
+{
+    point.Payload["questionNumber"] = questionNumber.Value;
+}
+
 
 				await _qdrantClient.UpsertAsync(
 					collectionName: _collectionName,
@@ -319,107 +333,121 @@ namespace BLL.Service
 			}
 		}
 
-	public async Task<List<SimilarityPair>> SearchSimilarToDocumentAsync(long docFileId, long examId, float threshold)
-		{
-			var similarPairs = new List<SimilarityPair>();
+	public async Task<List<SimilarityPair>> SearchSimilarToDocumentByTextAsync(
+    long docFileId,
+    long examId,
+    string studentCode,
+    int? questionNumber,
+    string text,
+    float threshold)
+{
+    var similarPairs = new List<SimilarityPair>();
 
-			try
-			{
-			_logger.LogInformation($"[SearchSimilar] Starting similarity search for DocFile {docFileId} in Exam {examId} with threshold {threshold:P0}");
+    try
+    {
+        _logger.LogInformation(
+            "[SearchSimilar] Starting similarity search for DocFile {DocFileId} in Exam {ExamId} with threshold {Threshold:P0}",
+            docFileId, examId, threshold);
 
-			// 1. Retrieve the target document's vector
-			var targetPoints = await _qdrantClient.RetrieveAsync(
-				collectionName: _collectionName,
-				ids: new[] { new PointId { Num = (ulong)docFileId } },
-				withPayload: true,
-				withVectors: true
-			);
+        // Tạo vector query trực tiếp từ text hiện tại
+        var targetVector = await GenerateEmbeddingAsync(text);
 
-			if (!targetPoints.Any())
-			{
-				_logger.LogWarning($"[SearchSimilar] DocFile {docFileId} not found in vector database");
-				throw new InvalidOperationException($"Document {docFileId} is not indexed in vector database");
-			}
+        if (targetVector == null || targetVector.Length == 0)
+        {
+            throw new Exception($"Failed to generate query vector for DocFile {docFileId}");
+        }
 
-			var targetPoint = targetPoints.First();
-			var targetVector = targetPoint.Vectors.Vector.Data.ToArray();
-			var targetStudentCode = targetPoint.Payload["studentCode"].StringValue;
+        var filter = new Filter();
 
-			_logger.LogInformation($"[SearchSimilar] Retrieved target document (Student: {targetStudentCode}) vector from Qdrant");
+        // luôn cùng exam
+        filter.Must.Add(new Condition
+        {
+            Field = new FieldCondition
+            {
+                Key = "examId",
+                Match = new Match { Integer = examId }
+            }
+        });
 
-			// 2. Use Qdrant's search to find similar documents in the same exam
-				var filter = new Filter
-				{
-					Must =
-					{
-						new Condition
-						{
-							Field = new FieldCondition
-							{
-								Key = "examId",
-								Match = new Match { Integer = examId }
-							}
-						}
-					}
-				};
+        // nếu có questionNumber thì chỉ so cùng câu
+        if (questionNumber.HasValue)
+        {
+            filter.Must.Add(new Condition
+            {
+                Field = new FieldCondition
+                {
+                    Key = "questionNumber",
+                    Match = new Match { Integer = questionNumber.Value }
+                }
+            });
+        }
 
-			_logger.LogDebug($"[SearchSimilar] Querying Qdrant for similar documents in Exam {examId}...");
+        // loại cùng sinh viên
+        if (!string.IsNullOrWhiteSpace(studentCode))
+        {
+            filter.MustNot.Add(new Condition
+            {
+                Field = new FieldCondition
+                {
+                    Key = "studentCode",
+                   Match = new Match { Keyword = (studentCode ?? "").ToLower() }
+                }
+            });
+        }
 
-			var countResult = await _qdrantClient.CountAsync(
-				collectionName: _collectionName,
-				filter: filter
-			);
-			var totalDocsInExam = countResult;
-			_logger.LogDebug($"[SearchSimilar] Found {totalDocsInExam} total documents in Exam {examId}");
+        // loại chính nó
+        filter.MustNot.Add(new Condition
+        {
+            Field = new FieldCondition
+            {
+                Key = "docFileId",
+                Match = new Match { Integer = docFileId }
+            }
+        });
 
-			var searchResults = await _qdrantClient.SearchAsync(
-				collectionName: _collectionName,
-				vector: targetVector,
-				filter: filter,
-				limit: Math.Max(totalDocsInExam, 1000), 
-				scoreThreshold: threshold,
-				payloadSelector: true
-			);
+        var searchResults = await _qdrantClient.SearchAsync(
+            collectionName: _collectionName,
+            vector: targetVector,
+            filter: filter,
+            limit: 100,
+            scoreThreshold: threshold,
+            payloadSelector: true
+        );
 
-			_logger.LogInformation($"[SearchSimilar] Qdrant returned {searchResults.Count} similar documents");
+        _logger.LogInformation(
+            "[SearchSimilar] Qdrant returned {Count} similar documents",
+            searchResults.Count);
 
-			// 3. Process results and exclude the source document itself
-			int matchCount = 0;
-			foreach (var result in searchResults)
-					{
-				var matchedDocFileId = (long)result.Payload["docFileId"].IntegerValue;
-				
-				// Skip the document itself
-				if (matchedDocFileId == docFileId)
-				{
-					_logger.LogDebug($"[SearchSimilar] Skipping self-match for DocFile {docFileId}");
-					continue;
-				}
+        foreach (var result in searchResults)
+        {
+            var matchedDocFileId = (long)result.Payload["docFileId"].IntegerValue;
 
-				var matchedStudentCode = result.Payload["studentCode"].StringValue;
-				var similarityScore = result.Score;
+            if (matchedDocFileId == docFileId)
+                continue;
 
-				matchCount++;
-				_logger.LogInformation($"[SearchSimilar] Match #{matchCount}: DocFile {matchedDocFileId} (Student: {matchedStudentCode}) - Similarity: {similarityScore:P2}");
+            similarPairs.Add(new SimilarityPair
+            {
+                DocFile1Id = docFileId,
+                DocFile2Id = matchedDocFileId,
+                SimilarityScore = result.Score
+            });
+        }
 
-							similarPairs.Add(new SimilarityPair
-							{
-					DocFile1Id = docFileId,
-					DocFile2Id = matchedDocFileId,
-					SimilarityScore = similarityScore
-							});
-				}
+        _logger.LogInformation(
+            "[SearchSimilar] Completed: Found {Count} suspicious document(s) similar to DocFile {DocFileId}",
+            similarPairs.Count, docFileId);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex,
+            "[SearchSimilar] Failed to search similar documents for DocFile {DocFileId}",
+            docFileId);
+        throw;
+    }
 
-			_logger.LogInformation($"[SearchSimilar] ✓ Completed: Found {similarPairs.Count} suspicious document(s) similar to DocFile {docFileId}");
-			}
-			catch (Exception ex)
-			{
-			_logger.LogError(ex, $"[SearchSimilar] ✗ Failed to search similar documents for DocFile {docFileId}");
-				throw;
-			}
+    return similarPairs;
+}
 
-			return similarPairs;
-		}
 
 		private float CosineSimilarity(float[] vector1, float[] vector2)
 		{
@@ -445,5 +473,6 @@ namespace BLL.Service
 
 			return dotProduct / (magnitude1 * magnitude2);
 		}
+		
 	}
 }

@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Tesseract;
+using Microsoft.Extensions.Logging;
 
 namespace BLL.Service
 {
@@ -16,14 +17,53 @@ namespace BLL.Service
 		private readonly string _tessdataPath;
 		private readonly IUnitOfWork _unitOfWork;
 		private readonly IS3Service _s3Service;
+		private readonly ILogger<TesseractOcrService> _logger;
 
-		public TesseractOcrService(string tessdataPath, IUnitOfWork unitOfWork, IS3Service s3Service)
-		{
-			_tessdataPath = tessdataPath;
-			_unitOfWork = unitOfWork;
-			_s3Service = s3Service;
-		}
+		public TesseractOcrService(
+    string tessdataPath,
+    IUnitOfWork unitOfWork,
+    IS3Service s3Service,
+    ILogger<TesseractOcrService> logger)
+{
+    _tessdataPath = tessdataPath;
+    _unitOfWork = unitOfWork;
+    _s3Service = s3Service;
+    _logger = logger;
+}
+		public async Task<string> ExtractTextFromImageBytesAsync(byte[] imageBytes, string language = "eng")
+{
+    try
+    {
+        if (imageBytes == null || imageBytes.Length == 0)
+            return string.Empty;
 
+        return await Task.Run(() =>
+        {
+            using var pix = Pix.LoadFromMemory(imageBytes);
+            using var engine = new TesseractEngine(_tessdataPath, language, EngineMode.Default);
+            using var page = engine.Process(pix);
+
+            var rawText = page.GetText();
+            return CleanOcrText(rawText);
+        });
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "OCR failed when extracting text from image bytes.");
+        throw;
+    }
+}
+private string CleanOcrText(string rawText)
+{
+    if (string.IsNullOrWhiteSpace(rawText))
+        return string.Empty;
+
+    string final = rawText.Replace("\r", "");
+    final = Regex.Replace(final, @"[ ]{2,}", " ");
+    final = Regex.Replace(final, @"\n{3,}", "\n\n");
+
+    return final.Trim();
+}
 		public async Task<string> ExtractText(long examId, string imagePath, IFormFile file, string language = "eng")
 		{
 			// Đọc file ảnh vào memory

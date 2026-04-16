@@ -170,8 +170,9 @@ namespace SWD_Grading
 				var tessdataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
 				var uow = sp.GetRequiredService<IUnitOfWork>();
 				var s3 = sp.GetRequiredService<IS3Service>();
+				var logger = sp.GetRequiredService<ILogger<TesseractOcrService>>();
 
-				return new TesseractOcrService(tessdataPath, uow, s3);
+				return new TesseractOcrService(tessdataPath, uow, s3, logger);
 			});
 			builder.Services.AddScoped<IExamStudentService, ExamStudentService>();
 			builder.Services.AddScoped<IS3Service, S3Service>();

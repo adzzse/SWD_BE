@@ -10,6 +10,7 @@ namespace BLL.Interface
 	public interface ITesseractOcrService
 	{
 
+		Task<string> ExtractTextFromImageBytesAsync(byte[] imageBytes, string language = "eng");
 		Task<string> ExtractText(long examId, string imagePath, IFormFile file, string language = "eng");
 
 	}
