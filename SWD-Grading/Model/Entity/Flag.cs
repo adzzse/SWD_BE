@@ -29,8 +29,8 @@ namespace Model.Entity
 		[Column(TypeName = "DECIMAL(5,4)")]
 		public decimal ThresholdUsed { get; set; }
 
-		[MaxLength(100)]
-		public string Source { get; set; } = "SYSTEM";
+		[Required]
+		public SimilarityScope Source { get; set; } = SimilarityScope.SYSTEM;
 
 		[Required]
 		public FlagReviewStatus ReviewStatus { get; set; } = FlagReviewStatus.PENDING;
