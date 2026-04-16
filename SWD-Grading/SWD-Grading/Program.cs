@@ -175,6 +175,7 @@ namespace SWD_Grading
 			});
 			builder.Services.AddScoped<IExamStudentService, ExamStudentService>();
 			builder.Services.AddScoped<IS3Service, S3Service>();
+			builder.Services.AddScoped<IArchiveExtractionService, ArchiveExtractionService>();
 			builder.Services.AddScoped<IFileProcessingService, FileProcessingService>();
 			builder.Services.AddScoped<IExamUploadService, ExamUploadService>();
 			builder.Services.AddScoped<IVectorService, VectorService>();

@@ -21,13 +21,15 @@ namespace BLL.Service
 		private readonly IUnitOfWork _unitOfWork;
 		private readonly IS3Service _s3Service;
 		private readonly IExamService _examService;
+		private readonly IArchiveExtractionService _archiveExtractionService;
 		private readonly ILogger<FileProcessingService> _logger;
 
-		public FileProcessingService(IUnitOfWork unitOfWork, IS3Service s3Service, IExamService examService, ILogger<FileProcessingService> logger)
+		public FileProcessingService(IUnitOfWork unitOfWork, IS3Service s3Service, IExamService examService, IArchiveExtractionService archiveExtractionService, ILogger<FileProcessingService> logger)
 		{
 			_unitOfWork = unitOfWork;
 			_s3Service = s3Service;
 			_examService = examService;
+			_archiveExtractionService = archiveExtractionService;
 			_logger = logger;
 		}
 
@@ -71,7 +73,7 @@ namespace BLL.Service
 				try
 				{
 					// Extract main ZIP file
-					ZipFile.ExtractToDirectory(examZip.ZipPath, tempExtractPath);
+					await _archiveExtractionService.ExtractToDirectoryAsync(examZip.ZipPath, tempExtractPath);
 					examZip.ExtractedPath = tempExtractPath;
 
 					// Find Student_Solutions folder (it might be at root or inside another folder)
@@ -226,17 +228,20 @@ namespace BLL.Service
 				.Where(f => !Path.GetFileName(f).StartsWith("~$")) // Exclude temp Word files
 				.ToList();
 
-			// Check for solution.zip
-			var solutionZipPath = Path.Combine(zeroFolderPath, "solution.zip");
-			var hasSolutionZip = File.Exists(solutionZipPath);
+			// Check for solution archive
+			var solutionArchivePath = new[] { "solution.zip", "solution.rar" }
+				.Select(fileName => Path.Combine(zeroFolderPath, fileName))
+				.FirstOrDefault(File.Exists);
+			var hasSolutionArchive = !string.IsNullOrEmpty(solutionArchivePath);
 
-			// Upload solution.zip to S3 if exists
-			string? solutionZipS3Url = null;
-			if (hasSolutionZip)
+			// Upload solution archive to S3 if exists
+			string? solutionArchiveS3Url = null;
+			if (hasSolutionArchive)
 			{
-				using (var zipFileStream = File.OpenRead(solutionZipPath))
+				var archiveFileName = Path.GetFileName(solutionArchivePath);
+				using (var zipFileStream = File.OpenRead(solutionArchivePath))
 				{
-					solutionZipS3Url = await _s3Service.UploadFileAsync(zipFileStream, "solution.zip", s3Path);
+					solutionArchiveS3Url = await _s3Service.UploadFileAsync(zipFileStream, archiveFileName, s3Path);
 				}
 			}
 
@@ -245,15 +250,15 @@ namespace BLL.Service
 			// Add existing .docx files from folder 0
 			allWordFiles.AddRange(existingDocxFiles);
 
-			// Extract solution.zip if exists to find more .docx files
-			if (hasSolutionZip)
+			// Extract solution archive if exists to find more .docx files
+			if (hasSolutionArchive)
 			{
 				var tempSolutionExtractPath = Path.Combine(Path.GetTempPath(), $"solution_{Guid.NewGuid()}");
 				Directory.CreateDirectory(tempSolutionExtractPath);
 
 				try
 				{
-					ZipFile.ExtractToDirectory(solutionZipPath, tempSolutionExtractPath);
+					await _archiveExtractionService.ExtractToDirectoryAsync(solutionArchivePath, tempSolutionExtractPath);
 
 					// Find all .docx files in extracted ZIP
 					var wordFilesInZip = Directory.GetFiles(tempSolutionExtractPath, "*.docx", SearchOption.AllDirectories)
@@ -269,12 +274,12 @@ namespace BLL.Service
 			}
 
 		// Process all Word files found
-		if (allWordFiles.Count == 0)
-		{
-			// No Word files found - throw error to be caught by outer try-catch
-			var errorMsg = hasSolutionZip 
-				? "No .docx files found in folder '0' or solution.zip" 
-				: "solution.zip not found and no .docx files in folder '0'";
+			if (allWordFiles.Count == 0)
+			{
+				// No Word files found - throw error to be caught by outer try-catch
+			var errorMsg = hasSolutionArchive 
+				? "No .docx files found in folder '0' or solution archive" 
+				: "solution archive not found and no .docx files in folder '0'";
 			throw new Exception(errorMsg);
 		}
 
