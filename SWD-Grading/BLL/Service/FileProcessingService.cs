@@ -22,12 +22,14 @@ namespace BLL.Service
 		private readonly IS3Service _s3Service;
 		private readonly IExamService _examService;
 		private readonly ILogger<FileProcessingService> _logger;
-
-		public FileProcessingService(IUnitOfWork unitOfWork, IS3Service s3Service, IExamService examService, ILogger<FileProcessingService> logger)
+		private readonly ITesseractOcrService _tesseractOcrService;
+		
+		public FileProcessingService(IUnitOfWork unitOfWork, IS3Service s3Service, IExamService examService, ITesseractOcrService tesseractOcrService, ILogger<FileProcessingService> logger)
 		{
 			_unitOfWork = unitOfWork;
 			_s3Service = s3Service;
 			_examService = examService;
+			_tesseractOcrService = tesseractOcrService;
 			_logger = logger;
 		}
 
@@ -297,7 +299,7 @@ namespace BLL.Service
 
 			try
 			{
-				extractedText = ExtractTextFromWord(wordFilePath);
+				extractedText = await ExtractTextFromWordAsync(wordFilePath);
 				parseStatus = DocParseStatus.OK;
 				parseMessage = "Successfully parsed";
 			}
@@ -408,7 +410,7 @@ namespace BLL.Service
 			}
 			newDoc.MainDocumentPart.Document.Save();
 		}
-
+		string extractedText = await ExtractTextFromWordAsync(tempPath);
 		// Upload to S3
 		string s3Url;
 		string fileName = $"Question_{questionNum}.docx";
@@ -425,6 +427,7 @@ namespace BLL.Service
 			FileName = fileName,
 			FilePath = s3Url,
 			ParseStatus = DocParseStatus.OK,
+			ParsedText = extractedText,
 			ParseMessage = "Split section (Images preserved)",
 			QuestionNumber = questionNum,
 			IsEmbedded = false
@@ -437,53 +440,121 @@ namespace BLL.Service
 		if (File.Exists(tempPath)) File.Delete(tempPath);
 	}
 
-
-	public string ExtractTextFromWord(string wordFilePath)
+	public async Task<string> ExtractTextFromWordAsync(string wordFilePath)
+	{
+		try
 		{
-			try
+			var text = new StringBuilder();
+
+			using (WordprocessingDocument wordDoc = WordprocessingDocument.Open(wordFilePath, false))
 			{
-				var text = new StringBuilder();
+				var mainPart = wordDoc.MainDocumentPart;
+				var body = mainPart?.Document?.Body;
 
-				using (WordprocessingDocument wordDoc = WordprocessingDocument.Open(wordFilePath, false))
+				if (body == null || mainPart == null)
 				{
-					var body = wordDoc.MainDocumentPart?.Document?.Body;
-					if (body == null)
-					{
-						return string.Empty;
-					}
+					return string.Empty;
+				}
 
-					// Extract all text from paragraphs
-					foreach (var paragraph in body.Descendants<Paragraph>())
-					{
-						var paragraphText = paragraph.InnerText;
-						if (!string.IsNullOrWhiteSpace(paragraphText))
-						{
-							text.AppendLine(paragraphText);
-						}
-					}
+				// 1. Lấy paragraph nhưng bỏ paragraph nằm trong table để tránh lặp
+				foreach (var paragraph in body.Descendants<Paragraph>())
+				{
+					bool isInsideTable = paragraph.Ancestors<Table>().Any();
+					if (isInsideTable)
+						continue;
 
-					// Extract text from tables
-					foreach (var table in body.Descendants<Table>())
+					var paragraphText = paragraph.InnerText?.Trim();
+					if (!string.IsNullOrWhiteSpace(paragraphText))
 					{
-						foreach (var row in table.Descendants<TableRow>())
+						text.AppendLine(paragraphText);
+					}
+				}
+
+				// 2. Lấy text trong bảng
+				foreach (var table in body.Descendants<Table>())
+				{
+					foreach (var row in table.Descendants<TableRow>())
+					{
+						var rowText = new List<string>();
+
+						foreach (var cell in row.Descendants<TableCell>())
 						{
-							var rowText = new List<string>();
-							foreach (var cell in row.Descendants<TableCell>())
+							var cellText = cell.InnerText?.Trim();
+							if (!string.IsNullOrWhiteSpace(cellText))
 							{
-								rowText.Add(cell.InnerText);
+								rowText.Add(cellText);
 							}
+						}
+
+						if (rowText.Any())
+						{
 							text.AppendLine(string.Join("\t", rowText));
 						}
 					}
 				}
 
-				return text.ToString();
+				// 3. OCR ảnh trong file Word
+				var processedRelIds = new HashSet<string>();
+
+				var drawingBlips = body.Descendants<DocumentFormat.OpenXml.Drawing.Blip>()
+					.Where(b => b.Embed != null)
+					.Select(b => b.Embed!.Value);
+
+				foreach (var relId in drawingBlips)
+				{
+					if (string.IsNullOrWhiteSpace(relId) || !processedRelIds.Add(relId))
+						continue;
+
+					try
+					{
+						var part = mainPart.GetPartById(relId);
+						if (part is not ImagePart imagePart)
+							continue;
+
+						if (imagePart.ContentType != null &&
+							(imagePart.ContentType.Contains("wmf") || imagePart.ContentType.Contains("emf")))
+						{
+							_logger.LogInformation("Skipping unsupported vector image type: {ContentType}", imagePart.ContentType);
+							continue;
+						}
+
+						using var stream = imagePart.GetStream();
+						using var ms = new MemoryStream();
+						await stream.CopyToAsync(ms);
+
+						var imageBytes = ms.ToArray();
+
+						if (imageBytes.Length < 5 * 1024)
+							continue;
+
+						var ocrText = await _tesseractOcrService.ExtractTextFromImageBytesAsync(imageBytes, "eng");
+
+						_logger.LogInformation(
+							"OCR extracted {Length} chars from one body-referenced image in file: {WordFilePath}",
+							ocrText?.Length ?? 0,
+							wordFilePath);
+
+						if (!string.IsNullOrWhiteSpace(ocrText))
+						{
+							text.AppendLine("[OCR_IMAGE]");
+							text.AppendLine(ocrText);
+						}
+					}
+					catch (Exception ex)
+					{
+						_logger.LogWarning(ex, "Failed to OCR one body-referenced image in Word file: {WordFilePath}", wordFilePath);
+					}
+				}
 			}
-			catch (Exception ex)
-			{
-				throw new Exception($"Failed to extract text from Word document: {ex.Message}", ex);
-			}
+
+			return text.ToString().Trim();
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Failed to extract text from Word document: {WordFilePath}", wordFilePath);
+			throw;
 		}
 	}
+}
 }
 

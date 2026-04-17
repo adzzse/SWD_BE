@@ -9,6 +9,8 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Model.Enums;
 
 namespace BLL.Service
 {
@@ -35,7 +37,7 @@ namespace BLL.Service
 					if (!stoppingToken.IsCancellationRequested)
 					{
 						await ProcessPendingExamZipsAsync();
-						// await ProcessPendingEmbeddingsAsync();
+						await ProcessPendingEmbeddingsAsync();
 					}
 				}
 				catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
@@ -92,37 +94,42 @@ namespace BLL.Service
 			}
 		}
 
-		/*private async Task ProcessPendingEmbeddingsAsync()
+		private async Task ProcessPendingEmbeddingsAsync()
+{
+	using (var scope = _scopeFactory.CreateScope())
+	{
+		var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+		var plagiarismService = scope.ServiceProvider.GetRequiredService<IPlagiarismService>();
+
+		var recentDocFiles = await unitOfWork.DocFileRepository
+    .GetRecentlyParsedDocFilesAsync(limit: 10);
+
+recentDocFiles = recentDocFiles
+    .Where(x => x.ParseStatus == DocParseStatus.OK
+             && !x.IsEmbedded
+             && !string.IsNullOrWhiteSpace(x.ParsedText))
+    .ToList();
+
+		if (recentDocFiles.Any())
 		{
-			using (var scope = _serviceProvider.CreateScope())
+			_logger.LogInformation($"Found {recentDocFiles.Count} document(s) to generate embeddings");
+
+			foreach (var docFile in recentDocFiles)
 			{
-				var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-				var plagiarismService = scope.ServiceProvider.GetRequiredService<IPlagiarismService>();
-			
-				// Get all DocFiles with ParseStatus = OK that might need embeddings
-				// We'll process documents that were recently parsed
-				var recentDocFiles = await unitOfWork.DocFileRepository.GetRecentlyParsedDocFilesAsync(limit: 10);
-			
-				if (recentDocFiles.Any())
+				try
 				{
-					_logger.LogInformation($"Found {recentDocFiles.Count} document(s) to generate embeddings");
-			
-					foreach (var docFile in recentDocFiles)
-					{
-						try
-						{
-							_logger.LogInformation($"Generating embedding for DocFile ID: {docFile.Id}");
-							await plagiarismService.GenerateEmbeddingForDocFileAsync(docFile.Id);
-							_logger.LogInformation($"Successfully generated embedding for DocFile ID: {docFile.Id}");
-						}
-						catch (Exception ex)
-						{
-							_logger.LogError(ex, $"Error generating embedding for DocFile ID: {docFile.Id}");
-						}
-					}
+					_logger.LogInformation($"Generating embedding for DocFile ID: {docFile.Id}");
+					await plagiarismService.GenerateEmbeddingForDocFileAsync(docFile.Id);
+					_logger.LogInformation($"Successfully generated embedding for DocFile ID: {docFile.Id}");
+				}
+				catch (Exception ex)
+				{
+					_logger.LogError(ex, $"Error generating embedding for DocFile ID: {docFile.Id}");
 				}
 			}
-		}*/
+		}
+	}
+}
 	}
 }
 
