@@ -53,15 +53,21 @@ namespace SWD_Grading
 			builder.Services.AddControllers();
 
 			// CORS Configuration
-			var allowedOrigins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>()
-				?? new[]
-				{
-					"http://localhost:5173",
-					"https://swd-fe-vert.vercel.app",
-					"https://swd-fe-git-main-duys-projects-fa81d97e.vercel.app",
-					"https://swd-edym8ja1o-duys-projects-fa81d97e.vercel.app",
-					"https://swd-a82ibidfl-duys-projects-fa81d97e.vercel.app"
-				};
+			var configuredOrigins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
+			var fallbackOrigins = new[]
+			{
+				"http://localhost:5173",
+				"http://localhost:5064",
+				"https://localhost:7084",
+				"https://swd-fe-vert.vercel.app",
+				"https://swd-fe-git-main-duys-projects-fa81d97e.vercel.app",
+				"https://swd-edym8ja1o-duys-projects-fa81d97e.vercel.app",
+				"https://swd-a82ibidfl-duys-projects-fa81d97e.vercel.app"
+			};
+			var allowedOrigins = (configuredOrigins is { Length: > 0 } ? configuredOrigins : fallbackOrigins)
+				.Where(origin => !string.IsNullOrWhiteSpace(origin))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToArray();
 
 			builder.Services.AddCors(options =>
 			{
@@ -164,6 +170,7 @@ namespace SWD_Grading
 
 			// Services
 			builder.Services.AddScoped<IAuthService, AuthService>();
+			builder.Services.AddScoped<IStudentService, StudentService>();
 			builder.Services.AddScoped<IExamService, ExamService>();
 			builder.Services.AddScoped<ITesseractOcrService>(sp =>
 			{
