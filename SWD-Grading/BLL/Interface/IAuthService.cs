@@ -1,4 +1,4 @@
-﻿using BLL.Model.Request.Auth;
+﻿using BLL.Model.Request.Exam.Auth;
 using BLL.Model.Response.Auth;
 using System;
 using System.Collections.Generic;

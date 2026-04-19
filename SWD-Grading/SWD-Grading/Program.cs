@@ -2,6 +2,7 @@
 using Amazon.S3;
 using BLL.Interface;
 using BLL.Mapper;
+using BLL.Model.Config;
 using BLL.Service;
 using DAL;
 using DAL.Interface;
@@ -9,9 +10,9 @@ using DAL.Repository;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Npgsql.EntityFrameworkCore.PostgreSQL;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
 using OfficeOpenXml;
 using SWD_Grading.Exceptions;
 using System.Text;
@@ -182,9 +183,12 @@ namespace SWD_Grading
 			builder.Services.AddScoped<IAIVerificationService, AIVerificationService>();
 			builder.Services.AddScoped<IPlagiarismService, PlagiarismService>();
 			builder.Services.AddScoped<IPacketSimilarityService, PacketSimilarityService>();
-
-			// Register BackgroundJobService to automatically process uploaded ZIP files
-			builder.Services.AddHostedService<BackgroundJobService>();
+            builder.Services.AddScoped<IPacketSimilarityTestDataSeeder, PacketSimilarityTestDataSeeder>();
+            builder.Services.AddScoped<IPacketSimilarityThresholdResolver, PacketSimilarityThresholdResolver>();
+            builder.Services.Configure<PacketSimilarityOptions>(
+                                               builder.Configuration.GetSection("PacketSimilarity"));
+            // Register BackgroundJobService to automatically process uploaded ZIP files
+            builder.Services.AddHostedService<BackgroundJobService>();
 			builder.Services.AddScoped<IGradeService, GradeService>();
 			builder.Services.AddScoped<IGradeDetailService, GradeDetailService>();
 

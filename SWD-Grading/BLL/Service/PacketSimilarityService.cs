@@ -1,5 +1,6 @@
 using BLL.Interface;
 using BLL.Model.Response;
+using DAL;
 using DAL.Interface;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -18,18 +19,22 @@ namespace BLL.Service
 		private readonly IVectorService _vectorService;
 		private readonly IAIVerificationService _aiVerificationService;
 		private readonly ILogger<PacketSimilarityService> _logger;
-
-		public PacketSimilarityService(
+        private readonly SWDGradingDbContext _context;
+        private readonly IPacketSimilarityThresholdResolver _thresholdResolver;
+        public PacketSimilarityService(
 			IUnitOfWork unitOfWork,
 			IVectorService vectorService,
 			IAIVerificationService aiVerificationService,
-			ILogger<PacketSimilarityService> logger)
+			ILogger<PacketSimilarityService> logger, SWDGradingDbContext context,
+            IPacketSimilarityThresholdResolver thresholdResolver)
 		{
 			_unitOfWork = unitOfWork;
 			_vectorService = vectorService;
 			_aiVerificationService = aiVerificationService;
 			_logger = logger;
-		}
+            _context = context;
+            _thresholdResolver = thresholdResolver;
+        }
 
 		public async Task<List<QuestionPacketResponse>> GetPacketsAsync(long examId, int userId, int? questionNumber)
 		{
