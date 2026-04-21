@@ -18,18 +18,21 @@ namespace BLL.Service
 		private readonly IVectorService _vectorService;
 		private readonly IAIVerificationService _aiVerificationService;
 		private readonly ILogger<PlagiarismService> _logger;
-
+		private readonly IS3Service _s3Service;
+	
 		public PlagiarismService(
-			IUnitOfWork unitOfWork,
-			IVectorService vectorService,
-			IAIVerificationService aiVerificationService,
-			ILogger<PlagiarismService> logger)
-		{
-			_unitOfWork = unitOfWork;
-			_vectorService = vectorService;
-			_aiVerificationService = aiVerificationService;
-			_logger = logger;
-		}
+    IUnitOfWork unitOfWork,
+    IVectorService vectorService,
+    IAIVerificationService aiVerificationService,
+    IS3Service s3Service,
+    ILogger<PlagiarismService> logger)
+{
+    _unitOfWork = unitOfWork;
+    _vectorService = vectorService;
+    _aiVerificationService = aiVerificationService;
+    _s3Service = s3Service;
+    _logger = logger;
+}
 
 		public async Task<PlagiarismCheckResponse> CheckSuspiciousDocumentAsync(long docFileId, decimal threshold, int userId)
 		{
@@ -86,19 +89,28 @@ namespace BLL.Service
 			// 7. Always re-index when manually calling plagiarism check API to ensure latest data
 			_logger.LogInformation($"[PlagiarismCheck] Re-indexing DocFile {docFileId} (manual check always re-indexes)");
 			await _vectorService.IndexDocumentAsync(
-				docFileId: docFileId,
-				examId: examId,
-				studentCode: studentCode,
-				text: docFile.ParsedText
-			);
-
+    docFileId: docFileId,
+    examId: examStudent.ExamId,
+    studentCode: studentCode,
+    questionNumber: docFile.QuestionNumber,
+    text: docFile.ParsedText
+);
 			// Mark as embedded
 			docFile.IsEmbedded = true;
 			await _unitOfWork.SaveChangesAsync();
 
 			// 8. Search for similar documents using Qdrant's vector search
 			_logger.LogInformation($"[PlagiarismCheck] Searching for similar documents in Exam {examId}...");
-			var similarPairs = await _vectorService.SearchSimilarToDocumentAsync(docFileId, examId, (float)threshold);
+			var normalizedThreshold = threshold > 1 ? (float)(threshold / 100m) : (float)threshold;
+
+var similarPairs = await _vectorService.SearchSimilarToDocumentByTextAsync(
+    docFileId,
+    examId,
+    studentCode,
+    docFile.QuestionNumber,
+    docFile.ParsedText,
+    normalizedThreshold
+);
 
 			_logger.LogInformation($"[PlagiarismCheck] Found {similarPairs.Count} suspicious document(s) similar to DocFile {docFileId}");
 
@@ -159,40 +171,42 @@ namespace BLL.Service
 			_logger.LogInformation($"[PlagiarismCheck] ✓ Plagiarism check completed successfully. Check ID: {similarityCheck.Id}");
 
 			// 11. Build response with file paths
-			var response = new PlagiarismCheckResponse
-			{
-				CheckId = similarityCheck.Id,
-				ExamId = examId,
-				ExamCode = exam.ExamCode,
-				CheckedAt = similarityCheck.CheckedAt,
-				Threshold = threshold,
-				TotalPairsChecked = similarPairs.Count,
-				SuspiciousPairsCount = similarPairs.Count,
-				CheckedByUsername = user.Username,
-				SuspiciousPairs = similarityResults.Select(result =>
-				{
-					var matchedDocFile = _unitOfWork.DocFileRepository.GetByIdAsync(result.DocFile2Id).Result;
+			var suspiciousPairs = new List<SimilarityPairResponse>();
 
-					return new SimilarityPairResponse
-					{
-						ResultId = result.Id,
-						Student1Code = result.Student1Code ?? "Unknown",
-						Student2Code = result.Student2Code ?? "Unknown",
-						DocFile1Name = docFile.FileName,
-						DocFile2Name = matchedDocFile?.FileName,
-						DocFile1Id = result.DocFile1Id,
-						DocFile2Id = result.DocFile2Id,
-						SimilarityScore = result.SimilarityScore,
-						// Return file paths from DocFile records
-						DocFile1Path = docFile.FilePath,
-						DocFile2Path = matchedDocFile?.FilePath
-					};
-				}).ToList()
-			};
+foreach (var result in similarityResults)
+{
+    var matchedDocFile = await _unitOfWork.DocFileRepository.GetByIdAsync(result.DocFile2Id);
 
-			return response;
-		}
+    suspiciousPairs.Add(new SimilarityPairResponse
+    {
+        ResultId = result.Id,
+        Student1Code = result.Student1Code ?? "Unknown",
+        Student2Code = result.Student2Code ?? "Unknown",
+        DocFile1Name = docFile.FileName,
+        DocFile2Name = matchedDocFile?.FileName,
+        DocFile1Id = result.DocFile1Id,
+        DocFile2Id = result.DocFile2Id,
+        SimilarityScore = result.SimilarityScore,
+        DocFile1Path = _s3Service.GetPresignedUrlFromFullUrl(docFile.FilePath),
+        DocFile2Path = _s3Service.GetPresignedUrlFromFullUrl(matchedDocFile?.FilePath),
+    });
+}
 
+var response = new PlagiarismCheckResponse
+{
+    CheckId = similarityCheck.Id,
+    ExamId = examId,
+    ExamCode = exam.ExamCode,
+    CheckedAt = similarityCheck.CheckedAt,
+    Threshold = threshold,
+    TotalPairsChecked = similarPairs.Count,
+    SuspiciousPairsCount = similarPairs.Count,
+    CheckedByUsername = user.Username,
+    SuspiciousPairs = suspiciousPairs
+};
+
+return response;
+} 
 		public async Task GenerateEmbeddingForDocFileAsync(long docFileId)
 		{
 			_logger.LogInformation($"[GenerateEmbedding] Starting embedding generation for DocFile {docFileId}");
@@ -236,11 +250,12 @@ namespace BLL.Service
 
 			// Index the document
 			await _vectorService.IndexDocumentAsync(
-				docFileId: docFileId,
-				examId: examStudent.ExamId,
-				studentCode: studentCode,
-				text: docFile.ParsedText
-			);
+    docFileId: docFileId,
+    examId: examStudent.ExamId,
+    studentCode: studentCode,
+    questionNumber: docFile.QuestionNumber,
+    text: docFile.ParsedText
+);
 
 			// Mark as embedded
 			docFile.IsEmbedded = true;

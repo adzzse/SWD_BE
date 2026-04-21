@@ -184,11 +184,7 @@ namespace DAL.Migrations
                 oldType: "text",
                 oldNullable: true);
 
-            migrationBuilder.AddColumn<int>(
-                name: "QuestionNumber",
-                table: "doc_file",
-                type: "integer",
-                nullable: true);
+
 
             migrationBuilder.CreateTable(
                 name: "submission",
