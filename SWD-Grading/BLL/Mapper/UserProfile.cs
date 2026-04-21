@@ -1,5 +1,5 @@
 ﻿using AutoMapper;
-using BLL.Model.Request.Auth;
+using BLL.Model.Request.Exam.Auth;
 using Model.Entity;
 using System;
 using System.Collections.Generic;
