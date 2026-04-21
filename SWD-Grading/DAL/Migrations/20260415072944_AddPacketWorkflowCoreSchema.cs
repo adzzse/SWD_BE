@@ -184,8 +184,6 @@ namespace DAL.Migrations
                 oldType: "text",
                 oldNullable: true);
 
-
-
             migrationBuilder.CreateTable(
                 name: "submission",
                 columns: table => new
@@ -406,8 +404,6 @@ namespace DAL.Migrations
 
             migrationBuilder.DropTable(
                 name: "submission");
-
-
 
             migrationBuilder.AlterColumn<int>(
                 name: "Role",

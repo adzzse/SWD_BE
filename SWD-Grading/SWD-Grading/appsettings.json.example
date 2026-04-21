@@ -9,6 +9,12 @@
   "ConnectionStrings": {
     "DefaultConnection": "Server=localhost,1433;Database=SWDGradingDB;User Id=sa;Password=YourStr0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
   },
+  "JwtSettings": {
+    "SecretKey": "key32",
+    "Issuer": "SWD-Grading",
+    "Audience": "SWD-Grading-Client",
+    "ExpiryInMinutes": 60
+  },
   "AWS": {
     "BucketName": "your-bucket-name",
     "Region": "ap-southeast-1",
