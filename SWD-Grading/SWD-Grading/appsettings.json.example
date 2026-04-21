@@ -24,6 +24,27 @@
     "Endpoint": "http://localhost:6334",
     "CollectionName": "exam_submissions",
     "VectorSize": "384"
+  },
+  "PacketSimilarity": {
+    "DefaultThreshold": 0.8,
+    "SameQuestionThreshold": 0.8,
+    "GlobalThreshold": 0.9,
+    "SeedTestDataOnStartup": false,
+    "SeedExamId": null,
+    "QuestionThresholds": [
+      {
+        "ExamId": 1,
+        "QuestionNumber": 1,
+        "Scope": "SameQuestion",
+        "Threshold": 0.85
+      },
+      {
+        "ExamId": 1,
+        "QuestionNumber": null,
+        "Scope": "Global",
+        "Threshold": 0.92
+      }
+    ]
   }
 }
 

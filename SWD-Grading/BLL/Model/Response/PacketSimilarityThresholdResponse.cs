@@ -8,9 +8,10 @@ namespace BLL.Model.Response
 {
     public class PacketSimilarityThresholdResponse
     {
-        public int? ExamId { get; set; }
+        public long? ExamId { get; set; }
         public int? QuestionNumber { get; set; }
         public string Scope { get; set; } = "SameQuestion";
+        public decimal? RequestThreshold { get; set; }
         public decimal EffectiveThreshold { get; set; }
     }
 }

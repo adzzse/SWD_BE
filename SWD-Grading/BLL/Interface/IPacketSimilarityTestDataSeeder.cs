@@ -8,6 +8,6 @@ namespace BLL.Interface
 {
     public interface IPacketSimilarityTestDataSeeder
     {
-        Task<string> SeedAsync(int examId);
+        Task<string> SeedAsync(long examId);
     }
 }

@@ -4,8 +4,6 @@ using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace BLL.Service
 {
@@ -27,11 +25,11 @@ namespace BLL.Service
 
             var normalizedScope = NormalizeScope(scope);
 
-            var matchedQuestionRule = _options.QuestionThresholds
-                .FirstOrDefault(x =>
-                    (!x.ExamId.HasValue || x.ExamId == examId) &&
-                    (!x.QuestionNumber.HasValue || x.QuestionNumber == questionNumber) &&
-                    string.Equals(NormalizeScope(x.Scope), normalizedScope, StringComparison.OrdinalIgnoreCase));
+            var rules = _options.QuestionThresholds ?? new List<QuestionThresholdOption>();
+            var matchedQuestionRule = rules
+                .Where(x => IsRuleMatch(x, examId, questionNumber, normalizedScope))
+                .OrderByDescending(GetRuleSpecificity)
+                .FirstOrDefault();
 
             if (matchedQuestionRule != null)
             {
@@ -51,6 +49,30 @@ namespace BLL.Service
             return NormalizeThreshold(_options.DefaultThreshold);
         }
 
+        private static bool IsRuleMatch(QuestionThresholdOption rule, int? examId, int? questionNumber, string normalizedScope)
+        {
+            var ruleScope = NormalizeScope(rule.Scope);
+            return string.Equals(ruleScope, normalizedScope, StringComparison.OrdinalIgnoreCase)
+                   && (!rule.ExamId.HasValue || rule.ExamId == examId)
+                   && (!rule.QuestionNumber.HasValue || rule.QuestionNumber == questionNumber);
+        }
+
+        private static int GetRuleSpecificity(QuestionThresholdOption rule)
+        {
+            var specificity = 0;
+            if (rule.ExamId.HasValue)
+            {
+                specificity += 2;
+            }
+
+            if (rule.QuestionNumber.HasValue)
+            {
+                specificity += 1;
+            }
+
+            return specificity;
+        }
+
         private static string NormalizeScope(string? scope)
         {
             if (string.IsNullOrWhiteSpace(scope))
@@ -58,7 +80,19 @@ namespace BLL.Service
                 return "SameQuestion";
             }
 
-            return scope.Trim();
+            var normalized = scope.Trim();
+            if (normalized.Equals("same_question", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("same-question", StringComparison.OrdinalIgnoreCase))
+            {
+                return "SameQuestion";
+            }
+
+            if (normalized.Equals("all", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Global";
+            }
+
+            return normalized;
         }
 
         private static decimal NormalizeThreshold(decimal threshold)

@@ -215,7 +215,7 @@ namespace SWD_Grading.Controllers
         {
             try
             {
-                var message = await _packetSimilarityTestDataSeeder.SeedAsync((int)examId);
+                var message = await _packetSimilarityTestDataSeeder.SeedAsync(examId);
 
                 return Ok(new BaseResponse<object>
                 {
@@ -231,7 +231,7 @@ namespace SWD_Grading.Controllers
         }
 
         [HttpGet("exam/{examId:long}/effective-threshold")]
-        public ActionResult<BaseResponse<object>> GetEffectiveThreshold(
+        public ActionResult<BaseResponse<PacketSimilarityThresholdResponse>> GetEffectiveThreshold(
             long examId,
             [FromQuery] SimilarityScope scope = SimilarityScope.SameQuestion,
             [FromQuery] int? questionNumber = null,
@@ -239,17 +239,22 @@ namespace SWD_Grading.Controllers
         {
             try
             {
+                if (examId > int.MaxValue || examId < int.MinValue)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(examId), "ExamId is outside Int32 range.");
+                }
+
                 var effectiveThreshold = _thresholdResolver.ResolveThreshold(
-                    (int?)examId,
+                    (int)examId,
                     questionNumber,
                     scope.ToString(),
                     requestThreshold);
 
-                return Ok(new BaseResponse<object>
+                return Ok(new BaseResponse<PacketSimilarityThresholdResponse>
                 {
                     Success = true,
                     Message = "Effective threshold resolved successfully.",
-                    Data = new
+                    Data = new PacketSimilarityThresholdResponse
                     {
                         ExamId = examId,
                         QuestionNumber = questionNumber,

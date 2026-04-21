@@ -19,8 +19,10 @@ namespace BLL.Service
             _context = context;
         }
 
-        public async Task<string> SeedAsync(int examId)
+        public async Task<string> SeedAsync(long examId)
         {
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
             var exam = await _context.Exams
                 .Include(x => x.ExamStudents)
                 .FirstOrDefaultAsync(x => x.Id == examId);
@@ -52,6 +54,8 @@ namespace BLL.Service
             var studentB = students[1];
 
             var now = DateTime.UtcNow;
+            var attemptA = await GetNextSubmissionAttemptAsync(examId, studentA.Id);
+            var attemptB = await GetNextSubmissionAttemptAsync(examId, studentB.Id);
 
             var submissionA = new Submission
             {
@@ -60,8 +64,10 @@ namespace BLL.Service
                 OriginalFileName = $"seed-student-{studentA.Id}.docx",
                 OriginalFileUrl = $"seed://exam-{examId}/student-{studentA.Id}.docx",
                 SourceFormat = "DOCX",
-                Attempt = 1,
-                CreatedAt = now
+                Attempt = attemptA,
+                Status = SubmissionStatus.COMPLETED,
+                CreatedAt = now,
+                UpdatedAt = now
             };
 
             var submissionB = new Submission
@@ -71,8 +77,10 @@ namespace BLL.Service
                 OriginalFileName = $"seed-student-{studentB.Id}.docx",
                 OriginalFileUrl = $"seed://exam-{examId}/student-{studentB.Id}.docx",
                 SourceFormat = "DOCX",
-                Attempt = 1,
-                CreatedAt = now
+                Attempt = attemptB,
+                Status = SubmissionStatus.COMPLETED,
+                CreatedAt = now,
+                UpdatedAt = now
             };
 
             _context.Submissions.AddRange(submissionA, submissionB);
@@ -92,7 +100,8 @@ namespace BLL.Service
                     Status = QuestionPacketStatus.READY,
                     ParseConfidence = 0.98m,
                     ParseNotes = "Seeded test packet",
-                    CreatedAt = now
+                    CreatedAt = now,
+                    UpdatedAt = now
                 },
                 new QuestionPacket
                 {
@@ -106,7 +115,8 @@ namespace BLL.Service
                     Status = QuestionPacketStatus.READY,
                     ParseConfidence = 0.97m,
                     ParseNotes = "Seeded near-duplicate packet",
-                    CreatedAt = now
+                    CreatedAt = now,
+                    UpdatedAt = now
                 },
                 new QuestionPacket
                 {
@@ -120,7 +130,8 @@ namespace BLL.Service
                     Status = QuestionPacketStatus.READY,
                     ParseConfidence = 0.95m,
                     ParseNotes = "Seeded packet",
-                    CreatedAt = now
+                    CreatedAt = now,
+                    UpdatedAt = now
                 },
                 new QuestionPacket
                 {
@@ -134,7 +145,8 @@ namespace BLL.Service
                     Status = QuestionPacketStatus.READY,
                     ParseConfidence = 0.96m,
                     ParseNotes = "Seeded different packet",
-                    CreatedAt = now
+                    CreatedAt = now,
+                    UpdatedAt = now
                 }
             };
 
@@ -156,8 +168,19 @@ namespace BLL.Service
 
             _context.Flags.Add(seedFlag);
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
 
             return $"Seeded 2 submissions, 4 question packets, and 1 sample flag for exam {examId}.";
+        }
+
+        private async Task<int> GetNextSubmissionAttemptAsync(long examId, long examStudentId)
+        {
+            var latestAttempt = await _context.Submissions
+                .Where(x => x.ExamId == examId && x.ExamStudentId == examStudentId)
+                .Select(x => (int?)x.Attempt)
+                .MaxAsync();
+
+            return (latestAttempt ?? 0) + 1;
         }
     }
 }

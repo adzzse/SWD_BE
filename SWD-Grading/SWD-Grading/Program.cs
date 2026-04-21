@@ -222,6 +222,34 @@ namespace SWD_Grading
 				db.Database.Migrate();
 			}
 
+			var packetSimilarityOptions = app.Configuration
+				.GetSection("PacketSimilarity")
+				.Get<PacketSimilarityOptions>() ?? new PacketSimilarityOptions();
+
+			if (packetSimilarityOptions.SeedTestDataOnStartup)
+			{
+				using var scope = app.Services.CreateScope();
+				var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+				if (!packetSimilarityOptions.SeedExamId.HasValue)
+				{
+					logger.LogWarning("PacketSimilarity:SeedTestDataOnStartup is enabled but SeedExamId is null. Seeder skipped.");
+				}
+				else
+				{
+					try
+					{
+						var seeder = scope.ServiceProvider.GetRequiredService<IPacketSimilarityTestDataSeeder>();
+						var message = seeder.SeedAsync(packetSimilarityOptions.SeedExamId.Value).GetAwaiter().GetResult();
+						logger.LogInformation("Packet similarity test data seeder: {Message}", message);
+					}
+					catch (Exception ex)
+					{
+						logger.LogError(ex, "Packet similarity test data seeder failed on startup.");
+					}
+				}
+			}
+
 			// Configure the HTTP request pipeline.
 			if (app.Environment.IsDevelopment() || true)
 			{
