@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -407,9 +407,7 @@ namespace DAL.Migrations
             migrationBuilder.DropTable(
                 name: "submission");
 
-            migrationBuilder.DropColumn(
-                name: "QuestionNumber",
-                table: "doc_file");
+
 
             migrationBuilder.AlterColumn<int>(
                 name: "Role",
