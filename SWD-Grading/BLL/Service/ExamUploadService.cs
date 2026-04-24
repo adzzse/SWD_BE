@@ -19,15 +19,15 @@ namespace BLL.Service
 	public class ExamUploadService : IExamUploadService
 	{
 		private readonly IUnitOfWork _unitOfWork;
-		private readonly IConfiguration _configuration;
 		private readonly FileUploadConfiguration _fileUploadConfig;
+		private readonly IFileProcessingService _fileProcessingService;
 
-		public ExamUploadService(IUnitOfWork unitOfWork, IConfiguration configuration)
+		public ExamUploadService(IUnitOfWork unitOfWork, IConfiguration configuration, IFileProcessingService fileProcessingService)
 		{
 			_unitOfWork = unitOfWork;
-			_configuration = configuration;
 			_fileUploadConfig = new FileUploadConfiguration();
 			configuration.GetSection("FileUpload").Bind(_fileUploadConfig);
+			_fileProcessingService = fileProcessingService;
 		}
 
 		public async Task<long> InitiateUploadAsync(IFormFile zipFile, long examId)
@@ -40,9 +40,19 @@ namespace BLL.Service
 
 			// Check file extension
 			var extension = Path.GetExtension(zipFile.FileName).ToLower();
-			if (extension != ".zip")
+			var allowedExtensions = _fileUploadConfig.AllowedExtensions
+				.Where(value => !string.IsNullOrWhiteSpace(value))
+				.Select(value => value.Trim().ToLowerInvariant())
+				.ToHashSet();
+
+			if (allowedExtensions.Count == 0)
 			{
-				throw new ArgumentException($"File type {extension} is not allowed. Only .zip files are accepted.");
+				allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".zip" };
+			}
+
+			if (!allowedExtensions.Contains(extension))
+			{
+				throw new ArgumentException($"File type {extension} is not allowed. Only {string.Join(" and ", allowedExtensions.OrderBy(value => value))} files are accepted.");
 			}
 
 			// Check file size
@@ -74,7 +84,7 @@ namespace BLL.Service
 			}
 
 			// Save ZIP file temporarily
-			var fileName = $"{examCode}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid()}.zip";
+			var fileName = $"{examCode}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid()}{extension}";
 			var zipFilePath = Path.Combine(tempStoragePath, fileName);
 
 			using (var stream = new FileStream(zipFilePath, FileMode.Create))
@@ -98,6 +108,87 @@ namespace BLL.Service
 			await _unitOfWork.SaveChangesAsync();
 
 			return examZip.Id;
+		}
+
+		public async Task<UploadStudentSolutionsResponse> UploadSingleSolutionAsync(IFormFile file, long examId, long examStudentId)
+		{
+			if (file == null || file.Length == 0)
+			{
+				throw new ArgumentException("File is empty or null");
+			}
+
+			var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+			if (extension == ".doc")
+			{
+				throw new ArgumentException("Direct upload currently supports only .docx files. Please convert .doc to .docx before uploading.");
+			}
+
+			if (extension != ".docx")
+			{
+				throw new ArgumentException($"File type {extension} is not allowed. Only .docx files are accepted for direct upload.");
+			}
+
+			var maxSizeBytes = _fileUploadConfig.MaxFileSizeMB * 1024 * 1024;
+			if (file.Length > maxSizeBytes)
+			{
+				throw new ArgumentException($"File size exceeds maximum allowed size of {_fileUploadConfig.MaxFileSizeMB}MB");
+			}
+
+			var exam = await _unitOfWork.ExamRepository.GetByIdAsync(examId);
+			if (exam == null)
+			{
+				throw new ArgumentException($"Exam with ID {examId} not found");
+			}
+
+			var examStudent = await _unitOfWork.ExamStudentRepository.GetByIdAsync(examStudentId);
+			if (examStudent == null)
+			{
+				throw new ArgumentException($"ExamStudent with ID {examStudentId} not found");
+			}
+
+			if (examStudent.ExamId != examId)
+			{
+				throw new ArgumentException($"ExamStudent {examStudentId} does not belong to Exam {examId}");
+			}
+
+			var tempStoragePath = _fileUploadConfig.TempStoragePath;
+			if (!Path.IsPathRooted(tempStoragePath))
+			{
+				tempStoragePath = Path.Combine(Directory.GetCurrentDirectory(), tempStoragePath);
+			}
+
+			Directory.CreateDirectory(tempStoragePath);
+
+			var tempFileName = $"{exam.ExamCode}_{examStudentId}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid()}{extension}";
+			var tempFilePath = Path.Combine(tempStoragePath, tempFileName);
+
+			using (var stream = new FileStream(tempFilePath, FileMode.Create))
+			{
+				await file.CopyToAsync(stream);
+			}
+
+			var examZip = new ExamZip
+			{
+				ExamId = examId,
+				ZipName = file.FileName,
+				ZipPath = tempFilePath,
+				UploadedAt = DateTime.UtcNow,
+				ExtractedPath = null,
+				ParseStatus = ParseStatus.PENDING,
+				ParseSummary = "Processing direct solution upload..."
+			};
+
+			await _unitOfWork.ExamZipRepository.AddAsync(examZip);
+			await _unitOfWork.SaveChangesAsync();
+
+			await _fileProcessingService.ProcessSingleSolutionAsync(examStudentId, examZip.Id, tempFilePath, file.FileName);
+
+			return new UploadStudentSolutionsResponse
+			{
+				ExamZipId = examZip.Id,
+				Status = "Done",
+				Message = $"File '{file.FileName}' uploaded and processed successfully."
+			};
 		}
 
 		public async Task<ProcessingStatusResponse> GetProcessingStatusAsync(long examZipId)

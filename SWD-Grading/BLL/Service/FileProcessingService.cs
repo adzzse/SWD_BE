@@ -3,6 +3,7 @@ using DAL.Interface;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Model.Entity;
 using Model.Enums;
@@ -21,15 +22,15 @@ namespace BLL.Service
 		private readonly IUnitOfWork _unitOfWork;
 		private readonly IS3Service _s3Service;
 		private readonly IExamService _examService;
+		private readonly IArchiveExtractionService _archiveExtractionService;
 		private readonly ILogger<FileProcessingService> _logger;
-		private readonly ITesseractOcrService _tesseractOcrService;
-		
-		public FileProcessingService(IUnitOfWork unitOfWork, IS3Service s3Service, IExamService examService, ITesseractOcrService tesseractOcrService, ILogger<FileProcessingService> logger)
+
+		public FileProcessingService(IUnitOfWork unitOfWork, IS3Service s3Service, IExamService examService, IArchiveExtractionService archiveExtractionService, ILogger<FileProcessingService> logger)
 		{
 			_unitOfWork = unitOfWork;
 			_s3Service = s3Service;
 			_examService = examService;
-			_tesseractOcrService = tesseractOcrService;
+			_archiveExtractionService = archiveExtractionService;
 			_logger = logger;
 		}
 
@@ -73,7 +74,7 @@ namespace BLL.Service
 				try
 				{
 					// Extract main ZIP file
-					ZipFile.ExtractToDirectory(examZip.ZipPath, tempExtractPath);
+					await _archiveExtractionService.ExtractToDirectoryAsync(examZip.ZipPath, tempExtractPath);
 					examZip.ExtractedPath = tempExtractPath;
 
 					// Find Student_Solutions folder (it might be at root or inside another folder)
@@ -195,6 +196,92 @@ namespace BLL.Service
 			}
 		}
 
+		public async Task ProcessSingleSolutionAsync(long examStudentId, long examZipId, string wordFilePath, string originalFileName)
+		{
+			ExamZip? examZip = null;
+
+			try
+			{
+				examZip = await _unitOfWork.ExamZipRepository.GetByIdAsync(examZipId);
+				if (examZip == null)
+				{
+					throw new Exception($"ExamZip with ID {examZipId} not found");
+				}
+
+				if (string.IsNullOrWhiteSpace(wordFilePath) || !File.Exists(wordFilePath))
+				{
+					examZip.ParseStatus = ParseStatus.ERROR;
+					examZip.ParseSummary = "Uploaded file not found at specified path";
+					await _unitOfWork.SaveChangesAsync();
+					return;
+				}
+
+				var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
+				if (extension == ".doc")
+				{
+					throw new ArgumentException("Direct upload currently supports only .docx files. Please convert .doc to .docx before uploading.");
+				}
+
+				if (extension != ".docx")
+				{
+					throw new ArgumentException($"File type {extension} is not allowed. Only .docx files are accepted for direct upload.");
+				}
+
+				var examStudent = await _unitOfWork.GetRepository<ExamStudent, long>()
+					.Query(asNoTracking: false)
+					.Include(es => es.Student)
+					.FirstOrDefaultAsync(es => es.Id == examStudentId);
+
+				if (examStudent == null)
+				{
+					throw new Exception($"ExamStudent with ID {examStudentId} not found");
+				}
+
+				var exam = await _unitOfWork.ExamRepository.GetByIdAsync(examStudent.ExamId);
+				if (exam == null)
+				{
+					throw new Exception($"Exam with ID {examStudent.ExamId} not found");
+				}
+
+				var studentCode = examStudent.Student.StudentCode;
+				var s3Path = $"{exam.ExamCode}/{studentCode}";
+
+				await ProcessWordFileAsync(wordFilePath, originalFileName, examStudent, examZip, s3Path, studentCode);
+
+				examStudent.Status = ExamStudentStatus.PARSED;
+				examStudent.Note = $"Processed direct upload '{originalFileName}'";
+				examZip.ParseStatus = ParseStatus.DONE;
+				examZip.ParseSummary = $"Direct upload processed successfully for student '{studentCode}'.";
+
+				await _unitOfWork.SaveChangesAsync();
+			}
+			catch (Exception ex)
+			{
+				if (examZip != null)
+				{
+					examZip.ParseStatus = ParseStatus.ERROR;
+					examZip.ParseSummary = $"Direct upload failed: {ex.Message}";
+					await _unitOfWork.SaveChangesAsync();
+				}
+
+				throw;
+			}
+			finally
+			{
+				if (!string.IsNullOrWhiteSpace(wordFilePath) && File.Exists(wordFilePath))
+				{
+					try
+					{
+						File.Delete(wordFilePath);
+					}
+					catch (Exception ex)
+					{
+						_logger.LogWarning(ex, "Failed to delete temp file for direct upload: {FilePath}", wordFilePath);
+					}
+				}
+			}
+		}
+
 	private async Task ProcessStudentFolderAsync(string studentFolderPath, string folderName, ExamZip examZip, Exam exam)
 	{
 		// Use entire folder name as StudentCode (e.g., "Anhddhse170283")
@@ -228,17 +315,20 @@ namespace BLL.Service
 				.Where(f => !Path.GetFileName(f).StartsWith("~$")) // Exclude temp Word files
 				.ToList();
 
-			// Check for solution.zip
-			var solutionZipPath = Path.Combine(zeroFolderPath, "solution.zip");
-			var hasSolutionZip = File.Exists(solutionZipPath);
+			// Check for solution archive
+			var solutionArchivePath = new[] { "solution.zip", "solution.rar" }
+				.Select(fileName => Path.Combine(zeroFolderPath, fileName))
+				.FirstOrDefault(File.Exists);
+			var hasSolutionArchive = !string.IsNullOrEmpty(solutionArchivePath);
 
-			// Upload solution.zip to S3 if exists
-			string? solutionZipS3Url = null;
-			if (hasSolutionZip)
+			// Upload solution archive to S3 if exists
+			string? solutionArchiveS3Url = null;
+			if (hasSolutionArchive)
 			{
-				using (var zipFileStream = File.OpenRead(solutionZipPath))
+				var archiveFileName = Path.GetFileName(solutionArchivePath);
+				using (var zipFileStream = File.OpenRead(solutionArchivePath))
 				{
-					solutionZipS3Url = await _s3Service.UploadFileAsync(zipFileStream, "solution.zip", s3Path);
+					solutionArchiveS3Url = await _s3Service.UploadFileAsync(zipFileStream, archiveFileName, s3Path);
 				}
 			}
 
@@ -247,15 +337,15 @@ namespace BLL.Service
 			// Add existing .docx files from folder 0
 			allWordFiles.AddRange(existingDocxFiles);
 
-			// Extract solution.zip if exists to find more .docx files
-			if (hasSolutionZip)
+			// Extract solution archive if exists to find more .docx files
+			if (hasSolutionArchive)
 			{
 				var tempSolutionExtractPath = Path.Combine(Path.GetTempPath(), $"solution_{Guid.NewGuid()}");
 				Directory.CreateDirectory(tempSolutionExtractPath);
 
 				try
 				{
-					ZipFile.ExtractToDirectory(solutionZipPath, tempSolutionExtractPath);
+					await _archiveExtractionService.ExtractToDirectoryAsync(solutionArchivePath, tempSolutionExtractPath);
 
 					// Find all .docx files in extracted ZIP
 					var wordFilesInZip = Directory.GetFiles(tempSolutionExtractPath, "*.docx", SearchOption.AllDirectories)
@@ -271,12 +361,12 @@ namespace BLL.Service
 			}
 
 		// Process all Word files found
-		if (allWordFiles.Count == 0)
-		{
-			// No Word files found - throw error to be caught by outer try-catch
-			var errorMsg = hasSolutionZip 
-				? "No .docx files found in folder '0' or solution.zip" 
-				: "solution.zip not found and no .docx files in folder '0'";
+			if (allWordFiles.Count == 0)
+			{
+				// No Word files found - throw error to be caught by outer try-catch
+			var errorMsg = hasSolutionArchive 
+				? "No .docx files found in folder '0' or solution archive" 
+				: "solution archive not found and no .docx files in folder '0'";
 			throw new Exception(errorMsg);
 		}
 
@@ -284,60 +374,8 @@ namespace BLL.Service
 		foreach (var wordFilePath in allWordFiles)
 		{
 			var fileName = Path.GetFileName(wordFilePath);
-
-			// Upload Word file to S3
-			string wordFileS3Url;
-			using (var wordFileStream = File.OpenRead(wordFilePath))
-			{
-				wordFileS3Url = await _s3Service.UploadFileAsync(wordFileStream, fileName, s3Path);
-			}
-
-			// Extract text from Word document
-			string? extractedText = null;
-			string? parseMessage = null;
-			DocParseStatus parseStatus;
-
-			try
-			{
-				extractedText = await ExtractTextFromWordAsync(wordFilePath);
-				parseStatus = DocParseStatus.OK;
-				parseMessage = "Successfully parsed";
-			}
-			catch (Exception ex)
-			{
-				parseStatus = DocParseStatus.ERROR;
-				parseMessage = $"Error parsing Word document: {ex.Message}";
-			}
-
-			// Create DocFile record
-			var docFile = new DocFile
-			{
-				ExamStudentId = examStudent.Id,
-				ExamZipId = examZip.Id,
-				FileName = fileName,
-				FilePath = wordFileS3Url,
-				ParsedText = extractedText,
-				ParseStatus = parseStatus,
-				ParseMessage = parseMessage
-			};
-				await _unitOfWork.DocFileRepository.AddAsync(docFile);
-				await _unitOfWork.SaveChangesAsync();
-
-				//--------------------------------------------------------------------
-				// NEW: SPLIT SOLUTION BY QUESTIONS
-				//--------------------------------------------------------------------
-				if (parseStatus == DocParseStatus.OK)
-				{
-					try 
-					{
-						await SplitStudentSolutionByQuestionsAsync(wordFilePath, examStudent.Id, examZip.Id, s3Path);
-					}
-					catch (Exception ex)
-					{
-						_logger.LogError(ex, $"Failed to split document {fileName} for student {studentCode}");
-					}
-				}
-			}
+			await ProcessWordFileAsync(wordFilePath, fileName, examStudent, examZip, s3Path, studentCode);
+		}
 
 			// Update ExamStudent status to PARSED
 			examStudent.Status = ExamStudentStatus.PARSED;
@@ -345,6 +383,59 @@ namespace BLL.Service
 
 			await _unitOfWork.SaveChangesAsync();
 		}
+
+	private async Task ProcessWordFileAsync(string wordFilePath, string fileName, ExamStudent examStudent, ExamZip examZip, string s3Path, string studentCode)
+	{
+		string wordFileS3Url;
+		using (var wordFileStream = File.OpenRead(wordFilePath))
+		{
+			wordFileS3Url = await _s3Service.UploadFileAsync(wordFileStream, fileName, s3Path);
+		}
+
+		string? extractedText = null;
+		string? parseMessage = null;
+		DocParseStatus parseStatus;
+
+		try
+		{
+			extractedText = ExtractTextFromWord(wordFilePath);
+			parseStatus = DocParseStatus.OK;
+			parseMessage = "Successfully parsed";
+		}
+		catch (Exception ex)
+		{
+			parseStatus = DocParseStatus.ERROR;
+			parseMessage = $"Error parsing Word document: {ex.Message}";
+		}
+
+		var docFile = new DocFile
+		{
+			ExamStudentId = examStudent.Id,
+			ExamZipId = examZip.Id,
+			FileName = fileName,
+			FilePath = wordFileS3Url,
+			ParsedText = extractedText,
+			ParseStatus = parseStatus,
+			ParseMessage = parseMessage
+		};
+		await _unitOfWork.DocFileRepository.AddAsync(docFile);
+		await _unitOfWork.SaveChangesAsync();
+
+            //--------------------------------------------------------------------
+            // NEW: SPLIT SOLUTION BY QUESTIONS
+            //--------------------------------------------------------------------
+            if (parseStatus == DocParseStatus.OK)
+		{
+			try
+			{
+				await SplitStudentSolutionByQuestionsAsync(wordFilePath, examStudent.Id, examZip.Id, s3Path);
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, $"Failed to split document {fileName} for student {studentCode}");
+			}
+		}
+	}
 
 	private async Task SplitStudentSolutionByQuestionsAsync(string sourcePath, long examStudentId, long examZipId, string s3Path)
 	{
@@ -410,7 +501,7 @@ namespace BLL.Service
 			}
 			newDoc.MainDocumentPart.Document.Save();
 		}
-		string extractedText = await ExtractTextFromWordAsync(tempPath);
+
 		// Upload to S3
 		string s3Url;
 		string fileName = $"Question_{questionNum}.docx";
@@ -427,7 +518,6 @@ namespace BLL.Service
 			FileName = fileName,
 			FilePath = s3Url,
 			ParseStatus = DocParseStatus.OK,
-			ParsedText = extractedText,
 			ParseMessage = "Split section (Images preserved)",
 			QuestionNumber = questionNum,
 			IsEmbedded = false
@@ -440,121 +530,53 @@ namespace BLL.Service
 		if (File.Exists(tempPath)) File.Delete(tempPath);
 	}
 
-	public async Task<string> ExtractTextFromWordAsync(string wordFilePath)
-	{
-		try
+
+	public string ExtractTextFromWord(string wordFilePath)
 		{
-			var text = new StringBuilder();
-
-			using (WordprocessingDocument wordDoc = WordprocessingDocument.Open(wordFilePath, false))
+			try
 			{
-				var mainPart = wordDoc.MainDocumentPart;
-				var body = mainPart?.Document?.Body;
+				var text = new StringBuilder();
 
-				if (body == null || mainPart == null)
+				using (WordprocessingDocument wordDoc = WordprocessingDocument.Open(wordFilePath, false))
 				{
-					return string.Empty;
-				}
-
-				// 1. Lấy paragraph nhưng bỏ paragraph nằm trong table để tránh lặp
-				foreach (var paragraph in body.Descendants<Paragraph>())
-				{
-					bool isInsideTable = paragraph.Ancestors<Table>().Any();
-					if (isInsideTable)
-						continue;
-
-					var paragraphText = paragraph.InnerText?.Trim();
-					if (!string.IsNullOrWhiteSpace(paragraphText))
+					var body = wordDoc.MainDocumentPart?.Document?.Body;
+					if (body == null)
 					{
-						text.AppendLine(paragraphText);
+						return string.Empty;
 					}
-				}
 
-				// 2. Lấy text trong bảng
-				foreach (var table in body.Descendants<Table>())
-				{
-					foreach (var row in table.Descendants<TableRow>())
+					// Extract all text from paragraphs
+					foreach (var paragraph in body.Descendants<Paragraph>())
 					{
-						var rowText = new List<string>();
-
-						foreach (var cell in row.Descendants<TableCell>())
+						var paragraphText = paragraph.InnerText;
+						if (!string.IsNullOrWhiteSpace(paragraphText))
 						{
-							var cellText = cell.InnerText?.Trim();
-							if (!string.IsNullOrWhiteSpace(cellText))
-							{
-								rowText.Add(cellText);
-							}
+							text.AppendLine(paragraphText);
 						}
+					}
 
-						if (rowText.Any())
+					// Extract text from tables
+					foreach (var table in body.Descendants<Table>())
+					{
+						foreach (var row in table.Descendants<TableRow>())
 						{
+							var rowText = new List<string>();
+							foreach (var cell in row.Descendants<TableCell>())
+							{
+								rowText.Add(cell.InnerText);
+							}
 							text.AppendLine(string.Join("\t", rowText));
 						}
 					}
 				}
 
-				// 3. OCR ảnh trong file Word
-				var processedRelIds = new HashSet<string>();
-
-				var drawingBlips = body.Descendants<DocumentFormat.OpenXml.Drawing.Blip>()
-					.Where(b => b.Embed != null)
-					.Select(b => b.Embed!.Value);
-
-				foreach (var relId in drawingBlips)
-				{
-					if (string.IsNullOrWhiteSpace(relId) || !processedRelIds.Add(relId))
-						continue;
-
-					try
-					{
-						var part = mainPart.GetPartById(relId);
-						if (part is not ImagePart imagePart)
-							continue;
-
-						if (imagePart.ContentType != null &&
-							(imagePart.ContentType.Contains("wmf") || imagePart.ContentType.Contains("emf")))
-						{
-							_logger.LogInformation("Skipping unsupported vector image type: {ContentType}", imagePart.ContentType);
-							continue;
-						}
-
-						using var stream = imagePart.GetStream();
-						using var ms = new MemoryStream();
-						await stream.CopyToAsync(ms);
-
-						var imageBytes = ms.ToArray();
-
-						if (imageBytes.Length < 5 * 1024)
-							continue;
-
-						var ocrText = await _tesseractOcrService.ExtractTextFromImageBytesAsync(imageBytes, "eng");
-
-						_logger.LogInformation(
-							"OCR extracted {Length} chars from one body-referenced image in file: {WordFilePath}",
-							ocrText?.Length ?? 0,
-							wordFilePath);
-
-						if (!string.IsNullOrWhiteSpace(ocrText))
-						{
-							text.AppendLine("[OCR_IMAGE]");
-							text.AppendLine(ocrText);
-						}
-					}
-					catch (Exception ex)
-					{
-						_logger.LogWarning(ex, "Failed to OCR one body-referenced image in Word file: {WordFilePath}", wordFilePath);
-					}
-				}
+				return text.ToString();
 			}
-
-			return text.ToString().Trim();
-		}
-		catch (Exception ex)
-		{
-			_logger.LogError(ex, "Failed to extract text from Word document: {WordFilePath}", wordFilePath);
-			throw;
+			catch (Exception ex)
+			{
+				throw new Exception($"Failed to extract text from Word document: {ex.Message}", ex);
+			}
 		}
 	}
-}
 }
 

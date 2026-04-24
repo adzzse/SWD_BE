@@ -1,7 +1,7 @@
 ﻿using AutoMapper;
 using BCrypt.Net;
 using BLL.Interface;
-using BLL.Model.Request.Auth;
+using BLL.Model.Request.Exam.Auth;
 using BLL.Model.Response.Auth;
 using DAL.Interface;
 using Microsoft.Extensions.Configuration;

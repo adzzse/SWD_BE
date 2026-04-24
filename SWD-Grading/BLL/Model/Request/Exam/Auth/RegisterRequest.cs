@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace BLL.Model.Request.Auth
+namespace BLL.Model.Request.Exam.Auth
 {
     public class RegisterRequest
     {

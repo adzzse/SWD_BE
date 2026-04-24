@@ -19,6 +19,11 @@ namespace BLL.Service
 		private readonly IServiceScopeFactory _scopeFactory;
 		private readonly ILogger<BackgroundJobService> _logger;
 		private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(10);
+		private static readonly HashSet<string> SupportedArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+		{
+			".zip",
+			".rar"
+		};
 
 		public BackgroundJobService(IServiceScopeFactory scopeFactory, ILogger<BackgroundJobService> logger)
 		{
@@ -81,6 +86,13 @@ namespace BLL.Service
 					{
 						try
 						{
+							var extension = Path.GetExtension(examZip.ZipName ?? examZip.ZipPath ?? string.Empty);
+							if (!SupportedArchiveExtensions.Contains(extension))
+							{
+								_logger.LogInformation("Skipping ExamZip ID {ExamZipId} because file '{FileName}' is not a background archive", examZip.Id, examZip.ZipName);
+								continue;
+							}
+
 							_logger.LogInformation($"Processing ExamZip ID: {examZip.Id}");
 							await fileProcessingService.ProcessStudentSolutionsAsync(examZip.Id);
 							_logger.LogInformation($"Successfully processed ExamZip ID: {examZip.Id}");

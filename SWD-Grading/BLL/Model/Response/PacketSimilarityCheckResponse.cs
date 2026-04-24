@@ -10,6 +10,8 @@ namespace BLL.Model.Response
 		public int? QuestionNumber { get; set; }
 		public SimilarityScope Scope { get; set; }
 		public decimal Threshold { get; set; }
+		public decimal? RequestedThreshold { get; set; }
+		public bool IsThresholdFromConfig { get; set; }
 		public int TotalPacketsConsidered { get; set; }
 		public int TotalComparisons { get; set; }
 		public int FlaggedPairs { get; set; }
