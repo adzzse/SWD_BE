@@ -1,10 +1,11 @@
 using Model.Enums;
+using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Model.Entity
 {
-	[Table("processing_job")]
+	[Table("ProcessingJob")]
 	public class ProcessingJob
 	{
 		[Key]
@@ -18,10 +19,10 @@ namespace Model.Entity
 		public Submission Submission { get; set; } = null!;
 
 		[MaxLength(100)]
-		public string JobType { get; set; } = "SUBMISSION_PIPELINE";
+		public string? JobType { get; set; }
 
 		[Required]
-		public ProcessingJobStatus Status { get; set; } = ProcessingJobStatus.QUEUED;
+		public ProcessingJobStatus Status { get; set; } = ProcessingJobStatus.Pending;
 
 		public int ProgressPercent { get; set; }
 
@@ -29,8 +30,10 @@ namespace Model.Entity
 
 		public string? ErrorMessage { get; set; }
 
+		[Required]
 		public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+		[Required]
 		public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
 		public DateTime? StartedAt { get; set; }

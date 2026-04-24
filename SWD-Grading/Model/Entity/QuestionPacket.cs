@@ -1,10 +1,12 @@
 using Model.Enums;
+using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Model.Entity
 {
-	[Table("question_packet")]
+	[Table("QuestionPacket")]
 	public class QuestionPacket
 	{
 		[Key]
@@ -29,10 +31,11 @@ namespace Model.Entity
 		[ForeignKey(nameof(ExamStudentId))]
 		public ExamStudent ExamStudent { get; set; } = null!;
 
-		public long? ExamQuestionId { get; set; }
+		[Required]
+		public long ExamQuestionId { get; set; }
 
 		[ForeignKey(nameof(ExamQuestionId))]
-		public ExamQuestion? ExamQuestion { get; set; }
+		public ExamQuestion ExamQuestion { get; set; } = null!;
 
 		[Required]
 		public int QuestionNumber { get; set; }
@@ -42,22 +45,24 @@ namespace Model.Entity
 		[MaxLength(500)]
 		public string? PrimaryImageUrl { get; set; }
 
-		public string? ImageUrlsJson { get; set; }
+		public string? ImageUrisJson { get; set; }
 
 		[Required]
-		public QuestionPacketStatus Status { get; set; } = QuestionPacketStatus.PENDING;
+		public QuestionPacketStatus Status { get; set; } = QuestionPacketStatus.Pending;
 
 		public string? ParseNotes { get; set; }
 
 		[Column(TypeName = "DECIMAL(5,2)")]
 		public decimal? ParseConfidence { get; set; }
 
+		[Required]
 		public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+		[Required]
 		public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-		public ICollection<Flag> SourceFlags { get; set; } = new List<Flag>();
+		public ICollection<SimilarityFlag> PrimaryFlags { get; set; } = new List<SimilarityFlag>();
 
-		public ICollection<Flag> MatchedFlags { get; set; } = new List<Flag>();
+		public ICollection<SimilarityFlag> MatchedFlags { get; set; } = new List<SimilarityFlag>();
 	}
 }

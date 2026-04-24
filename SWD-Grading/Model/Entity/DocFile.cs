@@ -1,4 +1,4 @@
-using Model.Enums;
+﻿using Model.Enums;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -38,24 +38,19 @@ namespace Model.Entity
 
 		public string? ParsedText { get; set; } // LONGTEXT
 
-		[Required]
-		public DocParseStatus ParseStatus { get; set; } = DocParseStatus.NOT_FOUND;
+	[Required]
+	public DocParseStatus ParseStatus { get; set; } = DocParseStatus.NOT_FOUND;
 
-		public string? ParseMessage { get; set; }
+	public string? ParseMessage { get; set; }
 
-		/// <summary>
-		/// Indicates whether this document has been embedded into the vector database.
-		/// False = not yet embedded (will be automatically processed by background job)
-		/// True = already embedded
-		/// </summary>
-		[Required]
-		public bool IsEmbedded { get; set; }
+	public int? QuestionNumber { get; set; }
 
-		/// <summary>
-		/// If this file is a split segment representing a specific question's answer,
-		/// this stores the question number (1, 2, 3...).
-		/// Null indicates the original/full document.
-		/// </summary>
-		public int? QuestionNumber { get; set; }
-	}
+	/// <summary>
+	/// Indicates whether this document has been embedded into the vector database.
+	/// False = not yet embedded (will be automatically processed by background job)
+	/// True = already embedded
+	/// </summary>
+	[Required]
+	public bool IsEmbedded { get; set; } = false;
+}
 }

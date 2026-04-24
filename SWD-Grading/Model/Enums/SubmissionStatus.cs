@@ -2,10 +2,8 @@ namespace Model.Enums
 {
 	public enum SubmissionStatus
 	{
-		PENDING,
-		PROCESSING,
-		COMPLETED,
-		PARTIAL,
-		FAILED
+		Pending = 0,
+		Processed = 1,
+		Failed = 2
 	}
 }

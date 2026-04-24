@@ -18,20 +18,18 @@ namespace BLL.Service
 		private readonly IVectorService _vectorService;
 		private readonly IAIVerificationService _aiVerificationService;
 		private readonly ILogger<PacketSimilarityService> _logger;
-        private readonly IPacketSimilarityThresholdResolver _thresholdResolver;
-        public PacketSimilarityService(
+
+		public PacketSimilarityService(
 			IUnitOfWork unitOfWork,
 			IVectorService vectorService,
 			IAIVerificationService aiVerificationService,
-			ILogger<PacketSimilarityService> logger,
-            IPacketSimilarityThresholdResolver thresholdResolver)
+			ILogger<PacketSimilarityService> logger)
 		{
 			_unitOfWork = unitOfWork;
 			_vectorService = vectorService;
 			_aiVerificationService = aiVerificationService;
 			_logger = logger;
-            _thresholdResolver = thresholdResolver;
-        }
+		}
 
 		public async Task<List<QuestionPacketResponse>> GetPacketsAsync(long examId, int userId, int? questionNumber)
 		{
@@ -51,7 +49,7 @@ namespace BLL.Service
 			return packets.Select(MapPacketResponse).ToList();
 		}
 
-		public async Task<PacketSimilarityCheckResponse> CheckPacketAsync(long packetId, decimal? threshold, SimilarityScope scope, int userId)
+		public async Task<PacketSimilarityCheckResponse> CheckPacketAsync(long packetId, decimal threshold, SimilarityScope scope, int userId)
 		{
 			var user = await GetUserAsync(userId);
 			var packetRepo = _unitOfWork.GetRepository<QuestionPacket, long>();
@@ -70,17 +68,6 @@ namespace BLL.Service
 
 			EnsurePacketVisible(targetPacket, userId, user.Role);
 			EnsurePacketComparable(targetPacket);
-			var effectiveThreshold = _thresholdResolver.ResolveThreshold(
-				ToExamIdInt(targetPacket.ExamId),
-				scope == SimilarityScope.SameQuestion ? targetPacket.QuestionNumber : null,
-				scope.ToString(),
-				threshold);
-			_logger.LogInformation(
-				"Packet similarity check: PacketId={PacketId}, Scope={Scope}, RequestedThreshold={RequestedThreshold}, EffectiveThreshold={EffectiveThreshold}",
-				packetId,
-				scope,
-				threshold,
-				effectiveThreshold);
 
 			var candidateQuery = BuildPacketQuery(targetPacket.ExamId, null)
 				.Where(packet => packet.Id != packetId)
@@ -106,7 +93,7 @@ namespace BLL.Service
 
 				totalComparisons++;
 				var score = CalculateCosineSimilarity(embeddings[targetPacket.Id], embeddings[candidate.Id]);
-				if (score < (float)effectiveThreshold)
+				if (score < (float)threshold)
 				{
 					continue;
 				}
@@ -117,25 +104,25 @@ namespace BLL.Service
 				if (existingFlags.TryGetValue(key, out var existingFlag))
 				{
 					existingFlag.SimilarityScore = (decimal)score;
-					existingFlag.ThresholdUsed = effectiveThreshold;
-					await _unitOfWork.GetRepository<Flag, long>().UpdateAsync(existingFlag);
+					existingFlag.ThresholdUsed = threshold;
+					await _unitOfWork.GetRepository<SimilarityFlag, long>().UpdateAsync(existingFlag);
 					savedFlagIds.Add(existingFlag.Id);
 					updatedFlags++;
 					continue;
 				}
 
-				var flag = new Flag
+				var flag = new SimilarityFlag
 				{
 					QuestionPacketId = primaryId,
 					MatchedQuestionPacketId = matchedId,
 					SimilarityScore = (decimal)score,
-					ThresholdUsed = effectiveThreshold,
+					ThresholdUsed = threshold,
 					Source = scope,
-					ReviewStatus = FlagReviewStatus.PENDING,
+					ReviewStatus = FlagReviewStatus.Pending,
 					CreatedAt = DateTime.UtcNow
 				};
 
-				await _unitOfWork.GetRepository<Flag, long>().AddAsync(flag);
+				await _unitOfWork.GetRepository<SimilarityFlag, long>().AddAsync(flag);
 				await _unitOfWork.SaveChangesAsync();
 
 				existingFlags[key] = flag;
@@ -156,9 +143,7 @@ namespace BLL.Service
 				ExamId = targetPacket.ExamId,
 				QuestionNumber = scope == SimilarityScope.SameQuestion ? targetPacket.QuestionNumber : null,
 				Scope = scope,
-				Threshold = effectiveThreshold,
-				RequestedThreshold = threshold,
-				IsThresholdFromConfig = !threshold.HasValue,
+				Threshold = threshold,
 				TotalPacketsConsidered = comparablePackets.Count,
 				TotalComparisons = totalComparisons,
 				FlaggedPairs = flags.Count,
@@ -168,10 +153,9 @@ namespace BLL.Service
 			};
 		}
 
-		public async Task<PacketSimilarityCheckResponse> CheckExamPacketsAsync(long examId, decimal? threshold, SimilarityScope scope, int userId, int? questionNumber)
+		public async Task<PacketSimilarityCheckResponse> CheckExamPacketsAsync(long examId, decimal threshold, SimilarityScope scope, int userId, int? questionNumber)
 		{
 			var user = await GetUserAsync(userId);
-			var examIdInt = ToExamIdInt(examId);
 			var packets = await BuildPacketQuery(examId, questionNumber)
 				.OrderBy(packet => packet.QuestionNumber)
 				.ThenBy(packet => packet.Id)
@@ -182,18 +166,6 @@ namespace BLL.Service
 				throw new ArgumentException($"No ready packets found for exam {examId}");
 			}
 
-			var effectiveThreshold = _thresholdResolver.ResolveThreshold(
-				examIdInt,
-				questionNumber,
-				scope.ToString(),
-				threshold);
-			_logger.LogInformation(
-				"Exam packet similarity check: ExamId={ExamId}, QuestionNumber={QuestionNumber}, Scope={Scope}, RequestedThreshold={RequestedThreshold}, EffectiveThreshold={EffectiveThreshold}",
-				examId,
-				questionNumber,
-				scope,
-				threshold,
-				effectiveThreshold);
 			var embeddings = await GenerateEmbeddingsAsync(packets);
 			var existingFlags = await LoadExistingFlagLookupAsync(examId, scope);
 			var savedFlagIds = new List<long>();
@@ -208,11 +180,6 @@ namespace BLL.Service
 			foreach (var group in groupedPackets)
 			{
 				var groupList = group.ToList();
-				var groupThreshold = _thresholdResolver.ResolveThreshold(
-					examIdInt,
-					scope == SimilarityScope.SameQuestion ? groupList.FirstOrDefault()?.QuestionNumber : questionNumber,
-					scope.ToString(),
-					threshold);
 				for (var i = 0; i < groupList.Count; i++)
 				{
 					for (var j = i + 1; j < groupList.Count; j++)
@@ -234,7 +201,7 @@ namespace BLL.Service
 
 						totalComparisons++;
 						var score = CalculateCosineSimilarity(embeddings[left.Id], embeddings[right.Id]);
-						if (score < (float)groupThreshold)
+						if (score < (float)threshold)
 						{
 							continue;
 						}
@@ -245,25 +212,25 @@ namespace BLL.Service
 						if (existingFlags.TryGetValue(key, out var existingFlag))
 						{
 							existingFlag.SimilarityScore = (decimal)score;
-							existingFlag.ThresholdUsed = groupThreshold;
-							await _unitOfWork.GetRepository<Flag, long>().UpdateAsync(existingFlag);
+							existingFlag.ThresholdUsed = threshold;
+							await _unitOfWork.GetRepository<SimilarityFlag, long>().UpdateAsync(existingFlag);
 							savedFlagIds.Add(existingFlag.Id);
 							updatedFlags++;
 							continue;
 						}
 
-						var flag = new Flag
+						var flag = new SimilarityFlag
 						{
 							QuestionPacketId = primaryId,
 							MatchedQuestionPacketId = matchedId,
 							SimilarityScore = (decimal)score,
-							ThresholdUsed = groupThreshold,
+							ThresholdUsed = threshold,
 							Source = scope,
-							ReviewStatus = FlagReviewStatus.PENDING,
+							ReviewStatus = FlagReviewStatus.Pending,
 							CreatedAt = DateTime.UtcNow
 						};
 
-						await _unitOfWork.GetRepository<Flag, long>().AddAsync(flag);
+						await _unitOfWork.GetRepository<SimilarityFlag, long>().AddAsync(flag);
 						await _unitOfWork.SaveChangesAsync();
 
 						existingFlags[key] = flag;
@@ -285,9 +252,7 @@ namespace BLL.Service
 				ExamId = examId,
 				QuestionNumber = questionNumber,
 				Scope = scope,
-				Threshold = effectiveThreshold,
-				RequestedThreshold = threshold,
-				IsThresholdFromConfig = !threshold.HasValue,
+				Threshold = threshold,
 				TotalPacketsConsidered = packets.Count,
 				TotalComparisons = totalComparisons,
 				FlaggedPairs = flags.Count,
@@ -364,8 +329,8 @@ namespace BLL.Service
 				flag.QuestionPacket.ExamStudent.Student.StudentCode,
 				flag.MatchedQuestionPacket.ExamStudent.Student.StudentCode);
 
-			flag.ReviewStatus = FlagReviewStatus.AI_REVIEWED;
-			await _unitOfWork.GetRepository<Flag, long>().UpdateAsync(flag);
+			flag.ReviewStatus = FlagReviewStatus.AIReviewed;
+			await _unitOfWork.GetRepository<SimilarityFlag, long>().UpdateAsync(flag);
 			await _unitOfWork.SaveChangesAsync();
 
 			var response = MapFlagResponse(flag);
@@ -388,13 +353,13 @@ namespace BLL.Service
 				throw new ArgumentException($"SimilarityFlag with ID {flagId} not found");
 			}
 
-			flag.ReviewStatus = FlagReviewStatus.TEACHER_REVIEWED;
+			flag.ReviewStatus = FlagReviewStatus.TeacherReviewed;
 			flag.TeacherDecision = isSimilar;
 			flag.TeacherNotes = notes;
 			flag.ReviewedByUserId = user.Id;
 			flag.ReviewedAt = DateTime.UtcNow;
 
-			await _unitOfWork.GetRepository<Flag, long>().UpdateAsync(flag);
+			await _unitOfWork.GetRepository<SimilarityFlag, long>().UpdateAsync(flag);
 			await _unitOfWork.SaveChangesAsync();
 
 			return MapFlagResponse(flag);
@@ -420,7 +385,7 @@ namespace BLL.Service
 					.ThenInclude(examStudent => examStudent.Student)
 				.Include(packet => packet.ExamQuestion)
 				.Where(packet => packet.ExamId == examId)
-				.Where(packet => packet.Status == QuestionPacketStatus.READY)
+				.Where(packet => packet.Status == QuestionPacketStatus.Ready)
 				.Where(packet => !string.IsNullOrWhiteSpace(packet.ExtractedAnswerText));
 
 			if (questionNumber.HasValue)
@@ -431,10 +396,10 @@ namespace BLL.Service
 			return query;
 		}
 
-		private IQueryable<Flag> BuildFlagQuery(long? examId, int userId, UserRole role)
+		private IQueryable<SimilarityFlag> BuildFlagQuery(long? examId, int userId, UserRole role)
 		{
-			var flagRepo = _unitOfWork.GetRepository<Flag, long>();
-			IQueryable<Flag> query = flagRepo.Query(false)
+			var flagRepo = _unitOfWork.GetRepository<SimilarityFlag, long>();
+			IQueryable<SimilarityFlag> query = flagRepo.Query(false)
 				.Include(flag => flag.ReviewedByUser)
 				.Include(flag => flag.QuestionPacket)
 					.ThenInclude(packet => packet.Submission)
@@ -465,7 +430,7 @@ namespace BLL.Service
 		private async Task<Dictionary<long, float[]>> GenerateEmbeddingsAsync(IEnumerable<QuestionPacket> packets)
 		{
 			var packetList = packets
-				.Where(packet => !string.IsNullOrWhiteSpace(packet.ExtractedAnswerText) && packet.Status == QuestionPacketStatus.READY)
+				.Where(packet => !string.IsNullOrWhiteSpace(packet.ExtractedAnswerText) && packet.Status == QuestionPacketStatus.Ready)
 				.GroupBy(packet => packet.Id)
 				.Select(group => group.First())
 				.ToList();
@@ -479,9 +444,9 @@ namespace BLL.Service
 			return embeddingTasks.ToDictionary(task => task.Key, task => task.Value.Result);
 		}
 
-		private async Task<Dictionary<string, Flag>> LoadExistingFlagLookupAsync(long examId, SimilarityScope scope)
+		private async Task<Dictionary<string, SimilarityFlag>> LoadExistingFlagLookupAsync(long examId, SimilarityScope scope)
 		{
-			var flags = await _unitOfWork.GetRepository<Flag, long>().Query(false)
+			var flags = await _unitOfWork.GetRepository<SimilarityFlag, long>().Query(false)
 				.Include(flag => flag.QuestionPacket)
 				.Where(flag => flag.QuestionPacket.ExamId == examId && flag.Source == scope)
 				.ToListAsync();
@@ -491,14 +456,14 @@ namespace BLL.Service
 				flag => flag);
 		}
 
-		private async Task<List<Flag>> LoadFlagsByIdsAsync(List<long> flagIds)
+		private async Task<List<SimilarityFlag>> LoadFlagsByIdsAsync(List<long> flagIds)
 		{
 			if (flagIds.Count == 0)
 			{
-				return new List<Flag>();
+				return new List<SimilarityFlag>();
 			}
 
-			return await _unitOfWork.GetRepository<Flag, long>().Query(false)
+			return await _unitOfWork.GetRepository<SimilarityFlag, long>().Query(false)
 				.Include(flag => flag.ReviewedByUser)
 				.Include(flag => flag.QuestionPacket)
 					.ThenInclude(packet => packet.Submission)
@@ -517,7 +482,7 @@ namespace BLL.Service
 
 		private static void EnsurePacketComparable(QuestionPacket packet)
 		{
-			if (packet.Status != QuestionPacketStatus.READY || string.IsNullOrWhiteSpace(packet.ExtractedAnswerText))
+			if (packet.Status != QuestionPacketStatus.Ready || string.IsNullOrWhiteSpace(packet.ExtractedAnswerText))
 			{
 				throw new InvalidOperationException($"QuestionPacket {packet.Id} is not ready for similarity checking");
 			}
@@ -567,17 +532,7 @@ namespace BLL.Service
 			return dotProduct / ((float)Math.Sqrt(leftMagnitude) * (float)Math.Sqrt(rightMagnitude));
 		}
 
-		private static int ToExamIdInt(long examId)
-		{
-			if (examId > int.MaxValue || examId < int.MinValue)
-			{
-				throw new ArgumentOutOfRangeException(nameof(examId), "ExamId is outside Int32 range.");
-			}
-
-			return (int)examId;
-		}
-
-		private SimilarityFlagResponse MapFlagResponse(Flag flag)
+		private SimilarityFlagResponse MapFlagResponse(SimilarityFlag flag)
 		{
 			return new SimilarityFlagResponse
 			{
@@ -609,7 +564,7 @@ namespace BLL.Service
 				QuestionNumber = packet.QuestionNumber,
 				ExtractedAnswerText = packet.ExtractedAnswerText,
 				PrimaryImageUrl = packet.PrimaryImageUrl,
-				ImageUrlsJson = packet.ImageUrlsJson,
+				ImageUrisJson = packet.ImageUrisJson,
 				Status = packet.Status,
 				ParseConfidence = packet.ParseConfidence,
 				ParseNotes = packet.ParseNotes,

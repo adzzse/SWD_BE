@@ -2,10 +2,8 @@ namespace Model.Enums
 {
 	public enum FlagReviewStatus
 	{
-		PENDING,
-		CONFIRMED,
-		REJECTED,
-		AI_REVIEWED,
-		TEACHER_REVIEWED
+		Pending = 0,
+		AIReviewed = 1,
+		TeacherReviewed = 2
 	}
 }

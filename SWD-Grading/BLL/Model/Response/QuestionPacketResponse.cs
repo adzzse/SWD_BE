@@ -9,11 +9,11 @@ namespace BLL.Model.Response
 		public long SubmissionId { get; set; }
 		public long ExamId { get; set; }
 		public long ExamStudentId { get; set; }
-		public long? ExamQuestionId { get; set; }
+		public long ExamQuestionId { get; set; }
 		public int QuestionNumber { get; set; }
 		public string? ExtractedAnswerText { get; set; }
 		public string? PrimaryImageUrl { get; set; }
-		public string? ImageUrlsJson { get; set; }
+		public string? ImageUrisJson { get; set; }
 		public QuestionPacketStatus Status { get; set; }
 		public decimal? ParseConfidence { get; set; }
 		public string? ParseNotes { get; set; }
